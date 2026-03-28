@@ -39,6 +39,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\open_dashboard.ps1 -Demo
 
 See `docs/MONITORS.md` for monitor usage and `docs/SETUP.md` for setup.
 
+The AP/STA monitor scripts work directly from this repo:
+- if ESP-IDF + firmware ELFs are available, they use `idf_monitor.py`
+- otherwise they fall back to plain serial monitoring automatically
+
 Quick launch examples:
 
 ```powershell

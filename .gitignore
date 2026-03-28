@@ -167,3 +167,7 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Local dashboard state
+dashboard/dashboard_state.json
+dashboard/profiles/

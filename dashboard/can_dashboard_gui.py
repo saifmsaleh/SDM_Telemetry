@@ -1,22 +1,32 @@
 import argparse
+import csv
+import ctypes
+import json
 import math
+import os
 import queue
 import random
 import re
 import threading
 import time
 import tkinter as tk
-from tkinter import colorchooser, simpledialog
+from tkinter import colorchooser, filedialog, simpledialog
 from tkinter import ttk
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 try:
     import serial
     from serial import SerialException
+    try:
+        from serial.tools import list_ports
+    except ImportError:  # pragma: no cover - optional pyserial helper
+        list_ports = None
 except ImportError:  # pragma: no cover - handled at runtime
     serial = None
     SerialException = Exception
+    list_ports = None
 
 try:
     from PIL import Image, ImageTk
@@ -27,15 +37,26 @@ except ImportError:  # pragma: no cover - handled at runtime
 
 BACKGROUND = "#0F1116"
 CARD_BG = "#171A21"
-CARD_BORDER = "#2A2F3A"
+CARD_BORDER = "#232833"
+CARD_HOVER = "#1D222C"
 TEXT = "#E7EAF0"
 MUTED = "#9DA6B5"
-ACCENT = "#FFC627"
+ACCENT = "#F4B41A"
 ACCENT_2 = "#8C1D40"
 WARNING = "#F3C746"
 DANGER = "#C25170"
 GRID = "#232833"
 TRACK = "#242933"
+GAP_XS = 6
+GAP_SM = 8
+GAP_MD = 12
+GAP_LG = 16
+GAP_XL = 24
+PILL_FONT = ("Consolas", 10, "bold")
+LABEL_FONT = ("Bahnschrift SemiBold", 11)
+PERSISTED_STATE_FILE = "dashboard_state.json"
+PROFILES_DIR_NAME = "profiles"
+CUSTOM_GRAPH_PANEL_NAMES = ("custom_trend", "custom_trend_2", "custom_trend_3", "custom_trend_4")
 
 DEFAULT_PANEL_LAYOUTS = {
     "wheel_gauge": {"x": 0.015, "y": 0.04, "w": 0.20, "h": 0.18, "visible": False},
@@ -63,6 +84,9 @@ DEFAULT_PANEL_LAYOUTS = {
     "temp_trend": {"x": 0.02, "y": 1.02, "w": 0.48, "h": 0.20, "visible": False},
     "pressure_trend": {"x": 0.52, "y": 1.02, "w": 0.46, "h": 0.20, "visible": False},
     "custom_trend": {"x": 0.20, "y": 0.20, "w": 0.56, "h": 0.28, "visible": False},
+    "custom_trend_2": {"x": 0.18, "y": 0.52, "w": 0.56, "h": 0.28, "visible": False},
+    "custom_trend_3": {"x": 0.08, "y": 0.16, "w": 0.40, "h": 0.24, "visible": False},
+    "custom_trend_4": {"x": 0.52, "y": 0.16, "w": 0.40, "h": 0.24, "visible": False},
 }
 
 PANEL_MIN_SIZE = {
@@ -95,7 +119,10 @@ PANEL_DEFS = {
     "throttle_trend": {"label": "Throttle Graph", "section": "graphs"},
     "temp_trend": {"label": "Temp Graph", "section": "graphs"},
     "pressure_trend": {"label": "Pressure Graph", "section": "graphs"},
-    "custom_trend": {"label": "Custom Graph", "section": "graphs"},
+    "custom_trend": {"label": "Custom Graph 1", "section": "graphs"},
+    "custom_trend_2": {"label": "Custom Graph 2", "section": "graphs"},
+    "custom_trend_3": {"label": "Custom Graph 3", "section": "graphs"},
+    "custom_trend_4": {"label": "Custom Graph 4", "section": "graphs"},
 }
 
 GRAPH_METRIC_OPTIONS = {
@@ -145,6 +172,7 @@ FRAME3_RE = re.compile(
 class Metric:
     value: float | int | None = None
     display_value: float | None = None
+    velocity: float = 0.0
     minimum: float | int | None = None
     maximum: float | int | None = None
 
@@ -152,23 +180,36 @@ class Metric:
         self.value = new_value
         if self.display_value is None:
             self.display_value = float(new_value)
+            self.velocity = 0.0
         if self.minimum is None or new_value < self.minimum:
             self.minimum = new_value
         if self.maximum is None or new_value > self.maximum:
             self.maximum = new_value
 
-    def animate(self, alpha: float):
+    def animate(self, dt: float):
         if self.value is None:
             return
         target = float(self.value)
         if self.display_value is None:
             self.display_value = target
+            self.velocity = 0.0
             return
         delta = target - self.display_value
-        if abs(delta) < 0.02:
+        if abs(delta) < 0.01 and abs(self.velocity) < 0.01:
             self.display_value = target
+            self.velocity = 0.0
             return
-        self.display_value += delta * alpha
+        # Critically damped spring smoothing keeps the gauges fluid without overshoot.
+        omega = 14.0
+        x = self.display_value
+        v = self.velocity
+        f = 1.0 + 2.0 * dt * omega
+        oo = omega * omega
+        hoo = dt * oo
+        hhoo = dt * hoo
+        det_inv = 1.0 / (f + hhoo)
+        self.display_value = (f * x + dt * v + hhoo * target) * det_inv
+        self.velocity = (v + hoo * (target - x)) * det_inv
 
     @property
     def rendered_value(self):
@@ -179,6 +220,7 @@ class Metric:
     def reset_bounds(self):
         self.minimum = self.value
         self.maximum = self.value
+        self.velocity = 0.0
 
 
 @dataclass
@@ -224,9 +266,8 @@ class DashboardState:
 
     def animate_metrics(self):
         now = time.monotonic()
-        dt = max(0.0, min(0.12, now - self.last_animation_monotonic))
+        dt = max(0.0, min(0.08, now - self.last_animation_monotonic))
         self.last_animation_monotonic = now
-        alpha = 1.0 - math.exp(-dt * 11.0)
         for metric in (
             self.rpm,
             self.ect,
@@ -241,7 +282,7 @@ class DashboardState:
             self.throughput,
             self.neutral_park,
         ):
-            metric.animate(alpha)
+            metric.animate(dt)
 
     @property
     def data_age_seconds(self) -> float:
@@ -257,6 +298,16 @@ class SerialWorker(threading.Thread):
         self.baudrate = baudrate
         self.line_queue = line_queue
         self.demo_mode = demo_mode
+        self._stop_event = threading.Event()
+        self._serial = None
+
+    def stop(self):
+        self._stop_event.set()
+        try:
+            if self._serial is not None:
+                self._serial.close()
+        except Exception:
+            pass
 
     def run(self):
         if self.demo_mode:
@@ -267,11 +318,12 @@ class SerialWorker(threading.Thread):
             self.line_queue.put("ERROR: pyserial is not installed.")
             return
 
-        while True:
+        while not self._stop_event.is_set():
             try:
-                with serial.Serial(self.port, self.baudrate, timeout=1) as ser:
+                with serial.Serial(self.port, self.baudrate, timeout=0.5) as ser:
+                    self._serial = ser
                     self.line_queue.put(f"INFO: connected to {self.port} @ {self.baudrate}")
-                    while True:
+                    while not self._stop_event.is_set():
                         raw = ser.readline()
                         if not raw:
                             continue
@@ -279,8 +331,12 @@ class SerialWorker(threading.Thread):
                         if line:
                             self.line_queue.put(line)
             except SerialException as exc:
+                if self._stop_event.is_set():
+                    break
                 self.line_queue.put(f"ERROR: serial {self.port}: {exc}")
                 time.sleep(2.0)
+            finally:
+                self._serial = None
 
     def _run_demo(self):
         rpm = 1800
@@ -323,29 +379,29 @@ class ValueCard(tk.Frame):
         self.grid_propagate(False)
 
         self.title_label = tk.Label(
-            self, text=title, bg=CARD_BG, fg=MUTED, font=("Bahnschrift SemiBold", 15)
+            self, text=title, bg=CARD_BG, fg=MUTED, font=("Bahnschrift SemiBold", 14)
         )
-        self.title_label.grid(row=0, column=0, sticky="w", padx=18, pady=(14, 2))
+        self.title_label.grid(row=0, column=0, sticky="w", padx=GAP_LG, pady=(GAP_LG, 2))
 
         self.min_label = tk.Label(
-            self, text="MIN --", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift Condensed", 13)
+            self, text="MIN --", bg=CARD_BG, fg=MUTED, font=("Bahnschrift Condensed", 12)
         )
-        self.min_label.grid(row=0, column=1, sticky="e", padx=(8, 18), pady=(14, 0))
+        self.min_label.grid(row=0, column=1, sticky="e", padx=(GAP_SM, GAP_LG), pady=(GAP_LG, 0))
 
         self.value_label = tk.Label(
-            self, text="--", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift SemiBold", 34)
+            self, text="--", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift SemiBold", 32)
         )
-        self.value_label.grid(row=1, column=0, sticky="w", padx=18, pady=(4, 0))
+        self.value_label.grid(row=1, column=0, sticky="w", padx=GAP_LG, pady=(4, 0))
 
         self.max_label = tk.Label(
-            self, text="MAX --", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift Condensed", 13)
+            self, text="MAX --", bg=CARD_BG, fg=MUTED, font=("Bahnschrift Condensed", 12)
         )
-        self.max_label.grid(row=1, column=1, sticky="ne", padx=(8, 18), pady=(8, 0))
+        self.max_label.grid(row=1, column=1, sticky="ne", padx=(GAP_SM, GAP_LG), pady=(GAP_SM, 0))
 
         self.unit_label = tk.Label(
             self, text=unit, bg=CARD_BG, fg=MUTED, font=("Bahnschrift SemiBold", 12)
         )
-        self.unit_label.grid(row=2, column=0, sticky="w", padx=18, pady=(8, 16))
+        self.unit_label.grid(row=2, column=0, sticky="w", padx=GAP_LG, pady=(GAP_SM, GAP_LG))
 
         self.columnconfigure(0, weight=1)
 
@@ -363,9 +419,9 @@ class TextCard(tk.Frame):
         self.grid_propagate(False)
 
         self.title_label = tk.Label(
-            self, text=title, bg=CARD_BG, fg=MUTED, font=("Bahnschrift SemiBold", 15)
+            self, text=title, bg=CARD_BG, fg=MUTED, font=("Bahnschrift SemiBold", 14)
         )
-        self.title_label.pack(anchor="w", padx=18, pady=(14, 8))
+        self.title_label.pack(anchor="w", padx=GAP_LG, pady=(GAP_LG, GAP_SM))
 
         self.body_label = tk.Label(
             self,
@@ -377,7 +433,7 @@ class TextCard(tk.Frame):
             wraplength=220,
             font=("Consolas", 12),
         )
-        self.body_label.pack(fill="both", expand=True, padx=18, pady=(0, 14))
+        self.body_label.pack(fill="both", expand=True, padx=GAP_LG, pady=(0, GAP_LG))
 
     def set_text(self, text: str):
         self.body_label.config(text=text)
@@ -423,11 +479,11 @@ class GaugePanel(tk.Frame):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(10, min(19, int(scale * 0.078)))
+        title_size = max(10, min(17, int(scale * 0.072)))
         value_size = max(18, min(40, int(scale * 0.17)))
         unit_size = max(9, min(13, int(scale * 0.055)))
         footer_size = max(8, min(12, int(scale * 0.041)))
-        top_pad = max(8, int(h * 0.04))
+        top_pad = max(10, int(h * 0.05))
         self.canvas.create_text(
             w / 2,
             top_pad,
@@ -449,7 +505,7 @@ class GaugePanel(tk.Frame):
         arc_width = max(6, int(scale * 0.065))
         marker_width = max(2, int(scale * 0.015))
         self.canvas.create_arc(bbox, start=start, extent=extent, style="arc", width=arc_width, outline=TRACK)
-        self.canvas.create_arc(bbox, start=start, extent=extent * 0.72, style="arc", width=marker_width, outline=ACCENT)
+        self.canvas.create_arc(bbox, start=start, extent=extent * 0.72, style="arc", width=marker_width, outline="#C69A21")
         self.canvas.create_arc(bbox, start=start + extent * 0.72, extent=extent * 0.20, style="arc", width=marker_width, outline=WARNING)
         self.canvas.create_arc(bbox, start=start + extent * 0.92, extent=extent * 0.08, style="arc", width=marker_width, outline=DANGER)
 
@@ -467,7 +523,7 @@ class GaugePanel(tk.Frame):
             anchor="sw",
             text=f"Min {self._fmt(self.minimum)}",
             width=max(40, int(w * 0.42)),
-            fill=MUTED,
+            fill="#8690A1",
             font=("Consolas", footer_size),
             justify="left",
         )
@@ -477,7 +533,7 @@ class GaugePanel(tk.Frame):
             anchor="se",
             text=f"Max {self._fmt(self.maximum_seen)}",
             width=max(40, int(w * 0.42)),
-            fill=MUTED,
+            fill="#8690A1",
             font=("Consolas", footer_size),
             justify="right",
         )
@@ -506,9 +562,9 @@ class StatPanel(tk.Frame):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(9, min(17, int(scale * 0.075)))
+        title_size = max(9, min(16, int(scale * 0.068)))
         value_size = max(15, min(34, int(scale * 0.18)))
-        self.canvas.create_text(w / 2, 10, anchor="n", text=self.title, width=w - 20, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
+        self.canvas.create_text(w / 2, 12, anchor="n", text=self.title, width=w - 20, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
         self.canvas.create_text(w / 2, h / 2, text=self.value_text, fill=ACCENT, width=w - 28, font=("Bahnschrift Bold", value_size), justify="center")
 
 
@@ -542,6 +598,16 @@ class TrendPanel(tk.Frame):
             )
         return tuple(signature)
 
+    @staticmethod
+    def _downsample_points(points, max_points: int):
+        if len(points) <= max_points:
+            return points
+        stride = max(1, len(points) // max_points)
+        sampled = points[::stride]
+        if sampled[-1] != points[-1]:
+            sampled.append(points[-1])
+        return sampled
+
     def _draw(self):
         w = max(1, self.canvas.winfo_width())
         h = max(1, self.canvas.winfo_height())
@@ -551,10 +617,10 @@ class TrendPanel(tk.Frame):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(8, min(14, int(scale * 0.045)))
+        title_size = max(8, min(13, int(scale * 0.042)))
         legend_size = max(6, min(9, int(scale * 0.028)))
         axis_size = max(6, min(9, int(scale * 0.028)))
-        self.canvas.create_text(w / 2, 10, anchor="n", text=self.title, width=w - 20, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
+        self.canvas.create_text(w / 2, 12, anchor="n", text=self.title.title(), width=w - 20, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
 
         left, top, right, bottom = 42, 34, w - 14, h - 34
         plot_w = max(40, right - left)
@@ -573,7 +639,8 @@ class TrendPanel(tk.Frame):
         for item in self.series:
             all_values.extend(v for _, v in item["points"])
         if not all_values:
-            self.canvas.create_text(w / 2, h / 2, text="No data", fill=MUTED, font=("Bahnschrift SemiBold", max(12, title_size + 1)))
+            self.canvas.create_text(w / 2, h / 2 - 8, text="Waiting For Telemetry", fill=MUTED, font=("Bahnschrift SemiBold", max(11, title_size + 1)))
+            self.canvas.create_text(w / 2, h / 2 + 12, text="No samples in the current window", fill="#7F8898", font=("Bahnschrift", max(9, axis_size + 1)))
             return
 
         min_value = min(all_values)
@@ -591,7 +658,7 @@ class TrendPanel(tk.Frame):
         max_len = max(2, max_len)
 
         for item in self.series:
-            points = item["points"]
+            points = self._downsample_points(item["points"], max(60, int(plot_w / 2.5)))
             if len(points) < 2:
                 continue
             coords = []
@@ -600,7 +667,15 @@ class TrendPanel(tk.Frame):
                 x = left + plot_w * ((start_index + index) / (max_len - 1))
                 y = bottom - plot_h * ((value - min_value) / (max_value - min_value))
                 coords.extend((x, y))
-            self.canvas.create_line(*coords, fill=item["color"], width=2, smooth=True)
+            self.canvas.create_line(
+                *coords,
+                fill=item["color"],
+                width=max(2, int(scale * 0.008)),
+                smooth=True,
+                splinesteps=20,
+                capstyle=tk.ROUND,
+                joinstyle=tk.ROUND,
+            )
 
         legend_x = left
         for item in self.series:
@@ -649,7 +724,7 @@ class CustomTrendPanel(TrendPanel):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(8, min(14, int(scale * 0.045)))
+        title_size = max(8, min(13, int(scale * 0.042)))
         legend_size = max(6, min(9, int(scale * 0.028)))
         axis_size = max(6, min(9, int(scale * 0.027)))
         self.canvas.create_text(
@@ -667,9 +742,16 @@ class CustomTrendPanel(TrendPanel):
             self.canvas.create_text(
                 w / 2,
                 h / 2,
-                text="No metrics selected",
+                text="No Metrics Selected",
                 fill=MUTED,
-                font=("Bahnschrift SemiBold", max(12, title_size + 1)),
+                font=("Bahnschrift SemiBold", max(11, title_size + 1)),
+            )
+            self.canvas.create_text(
+                w / 2,
+                h / 2 + 18,
+                text="Right-click the container to add signals",
+                fill="#7F8898",
+                font=("Bahnschrift", max(9, legend_size + 1)),
             )
             return
 
@@ -735,12 +817,7 @@ class CustomTrendPanel(TrendPanel):
             if len(points) < 2:
                 continue
 
-            max_plot_points = max(40, int(plot_w / 3))
-            if len(points) > max_plot_points:
-                stride = max(1, len(points) // max_plot_points)
-                points = points[::stride]
-                if points[-1] != item["points"][-1]:
-                    points.append(item["points"][-1])
+            points = self._downsample_points(points, max(60, int(plot_w / 2.5)))
 
             coords = []
             start_index = max_len - len(points)
@@ -748,7 +825,15 @@ class CustomTrendPanel(TrendPanel):
                 x = left + plot_w * ((start_index + point_index) / (max_len - 1))
                 y = bottom - plot_h * ((value - axis_min) / (axis_max - axis_min))
                 coords.extend((x, y))
-            self.canvas.create_line(*coords, fill=item["color"], width=2, smooth=True)
+            self.canvas.create_line(
+                *coords,
+                fill=item["color"],
+                width=max(2, int(scale * 0.008)),
+                smooth=True,
+                splinesteps=20,
+                capstyle=tk.ROUND,
+                joinstyle=tk.ROUND,
+            )
 
         legend_x = left
         for item in self.series:
@@ -788,10 +873,10 @@ class TachPanel(tk.Frame):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(9, min(17, int(scale * 0.072)))
-        value_size = max(14, min(38, int(scale * 0.165)))
+        title_size = max(9, min(16, int(scale * 0.064)))
+        value_size = max(14, min(36, int(scale * 0.158)))
         top_pad = max(6, int(h * 0.02))
-        self.canvas.create_text(w / 2, top_pad, anchor="n", text=self.title, width=w - 24, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
+        self.canvas.create_text(w / 2, top_pad + 2, anchor="n", text=self.title, width=w - 24, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
 
         cx = w / 2
         cy = h * 0.59
@@ -806,7 +891,7 @@ class TachPanel(tk.Frame):
         rpm = 0.0 if self.rpm_value is None else float(self.rpm_value)
         progress = max(0.0, min(1.0, rpm / self.maximum)) if self.maximum else 0.0
         color = ACCENT if progress < 0.80 else WARNING if progress < 0.92 else DANGER
-        self.canvas.create_arc(bbox, start=start_deg, extent=sweep_deg * progress, style="arc", width=max(5, arc_width - 2), outline=color)
+        self.canvas.create_arc(bbox, start=start_deg, extent=sweep_deg * progress, style="arc", width=max(4, arc_width - 3), outline=color)
 
         major_ticks = 8
         minor_per_major = 4
@@ -826,7 +911,15 @@ class TachPanel(tk.Frame):
             x2 = cx + math.cos(angle_rad) * outer_tick
             y2 = cy - math.sin(angle_rad) * outer_tick
             tick_color = DANGER if fraction >= 0.84 else MUTED
-            self.canvas.create_line(x1, y1, x2, y2, fill=tick_color, width=2 if is_major else 1)
+            self.canvas.create_line(
+                x1,
+                y1,
+                x2,
+                y2,
+                fill=tick_color,
+                width=2 if is_major else 1,
+                capstyle=tk.ROUND,
+            )
 
             if is_major:
                 label_value = int((self.maximum / 1000.0) * fraction)
@@ -837,7 +930,7 @@ class TachPanel(tk.Frame):
                     ly,
                     text=str(label_value),
                     fill=MUTED,
-                    font=("Bahnschrift SemiBold", max(7, int(scale * 0.04))),
+                    font=("Bahnschrift SemiBold", max(7, int(scale * 0.038))),
                 )
 
         needle_angle_deg = start_deg + sweep_deg * progress
@@ -848,14 +941,24 @@ class TachPanel(tk.Frame):
         ny = cy - math.sin(needle_angle) * needle_length
         tx = cx - math.cos(needle_angle) * tail_length
         ty = cy + math.sin(needle_angle) * tail_length
-        self.canvas.create_line(tx, ty, nx, ny, fill=color, width=max(3, int(scale * 0.018)))
+        self.canvas.create_line(
+            tx,
+            ty,
+            nx,
+            ny,
+            fill=color,
+            width=max(2, int(scale * 0.014)),
+            capstyle=tk.ROUND,
+            joinstyle=tk.ROUND,
+        )
         self.canvas.create_oval(
             cx - max(7, int(scale * 0.03)),
             cy - max(7, int(scale * 0.03)),
             cx + max(7, int(scale * 0.03)),
             cy + max(7, int(scale * 0.03)),
             fill=TEXT,
-            outline="",
+            outline=CARD_BORDER,
+            width=1,
         )
 
         if self.logo_image is not None:
@@ -883,15 +986,18 @@ class TachPanel(tk.Frame):
 
 class DashboardApp:
     HISTORY_LIMIT = 180
-    LIVE_REFRESH_MS = 45
-    GRAPH_REFRESH_MS = 180
+    LIVE_REFRESH_MS = 16
+    GRAPH_REFRESH_MS = 120
 
-    def __init__(self, root: tk.Tk, state: DashboardState, line_queue: queue.Queue[str], port_label: str, initial_demo: bool = False):
+    def __init__(self, root: tk.Tk, state: DashboardState, line_queue: queue.Queue[str], initial_port: str, baudrate: int, initial_demo: bool = False):
         self.root = root
         self.state = state
         self.line_queue = line_queue
-        self.port_label = port_label
-        self.logo_image = None
+        self.port_label = initial_port
+        self.baudrate = baudrate
+        self.initial_demo = initial_demo
+        self.header_logo_image = None
+        self.tach_logo_image = None
         self._rx_window_start = time.monotonic()
         self._rx_window_bytes = 0
         self.panel_widgets = {}
@@ -912,25 +1018,58 @@ class DashboardApp:
         self.demo_rpm = 1800
         self.demo_direction = 1
         self._last_graph_refresh_monotonic = 0.0
+        self._last_log_monotonic = 0.0
+        self._last_logged_line_count = -1
+        self._last_serial_error = ""
         self._tab_signature = ()
         self._secret_buffer = ""
         self._easter_egg_after_id = None
         self._easter_egg_start = 0.0
+        self._undo_stack = []
+        self._undo_signature = None
+        self._max_undo = 30
         self.settings_dialog = None
+        self.log_handle = None
+        self.log_writer = None
+        self.log_path = None
+        self.log_format = None
+        self.log_columns = []
+        self.log_session_started_monotonic = None
+        self.log_session_started_wallclock = None
+        self.logging_active = False
+        self.logging_status_text = "LOG OFF"
+        self.latched_alerts = {}
+        self.last_alert_text = "NONE"
+        self._menu_entry_state_cache = {}
+        self._logging_pill_cache = None
+        self.persisted_state_path = Path(__file__).resolve().with_name(PERSISTED_STATE_FILE)
+        self.profiles_dir = Path(__file__).resolve().with_name(PROFILES_DIR_NAME)
+        self.current_profile_name = "Default"
         self.settings_model = self._build_default_settings_model()
         self.critical_limits = {
-            "rpm": {"label": "RPM", "low": "", "high": ""},
-            "ect": {"label": "Coolant Temp", "low": "", "high": ""},
-            "oil_temp": {"label": "Oil Temp", "low": "", "high": ""},
-            "oil_pressure": {"label": "Oil Pressure", "low": "", "high": ""},
-            "fuel_pressure": {"label": "Fuel Pressure", "low": "", "high": ""},
-            "lambda1": {"label": "Lambda", "low": "", "high": ""},
-            "tps": {"label": "TPS", "low": "", "high": ""},
-            "aps": {"label": "APS", "low": "", "high": ""},
-            "gear": {"label": "Gear", "low": "", "high": ""},
-            "wheel_speed": {"label": "Wheel Speed", "low": "", "high": ""},
-            "throughput": {"label": "Throughput", "low": "", "high": ""},
+            "rpm": {"label": "RPM", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "ect": {"label": "Coolant Temp", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "oil_temp": {"label": "Oil Temp", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "oil_pressure": {"label": "Oil Pressure", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "fuel_pressure": {"label": "Fuel Pressure", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "lambda1": {"label": "Lambda", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "tps": {"label": "TPS", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "aps": {"label": "APS", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "gear": {"label": "Gear", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "wheel_speed": {"label": "Wheel Speed", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "throughput": {"label": "Throughput", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
         }
+        self._persisted_tabs_payload = None
+        self._persisted_current_tab_index = 0
+        self._load_persisted_state()
+        if initial_port:
+            self.settings_model["connection"]["serial_port"] = initial_port
+        self.settings_model["connection"]["baud_rate"] = str(baudrate)
+        self.connection_state = "disconnected"
+        self.serial_worker = None
+        self.port_choices = []
+        self._graph_panel_options = {}
+        self._frozen_graph_series = {}
         self.critical_limit_vars = {}
         self.histories = {
             "rpm": [],
@@ -950,133 +1089,290 @@ class DashboardApp:
         self.root.configure(bg=BACKGROUND)
         self.root.geometry("1600x920")
         self.root.minsize(1400, 860)
+        self.root.protocol("WM_DELETE_WINDOW", self._on_root_close)
+        self._apply_dark_title_bar(self.root)
 
         outer = tk.Frame(root, bg=BACKGROUND)
         outer.pack(fill="both", expand=True, padx=12, pady=12)
         self.outer = outer
 
         header = tk.Frame(outer, bg=BACKGROUND)
-        header.pack(fill="x", pady=(0, 10))
-
+        header.pack(fill="x", pady=(0, GAP_SM))
         self._load_logo_image()
-        if self.logo_image is not None:
-            tk.Label(header, image=self.logo_image, bg=BACKGROUND).pack(side="left", padx=(0, 10))
-
-        title_wrap = tk.Frame(header, bg=BACKGROUND)
-        title_wrap.pack(side="left")
-        tk.Label(
-            title_wrap,
-            text="General  /  SDM Telemetry Client Go",
-            bg=BACKGROUND,
-            fg=TEXT,
-            font=("Bahnschrift SemiBold", 17),
-        ).pack(anchor="w")
-
-        self.settings_button = tk.Button(
-            header,
-            text="⚙",
-            command=self._open_settings_dialog,
-            bg=CARD_BG,
-            fg=ACCENT,
-            activebackground=CARD_BORDER,
-            activeforeground=ACCENT,
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=CARD_BORDER,
-            font=("Bahnschrift Bold", 14),
-            padx=10,
-            pady=6,
-            cursor="hand2",
-        )
-        self.settings_button.pack(side="right", padx=(0, 8))
-
-        self.reset_button = tk.Button(
-            header,
-            text="Reset Min/Max",
-            command=self._reset_metric_bounds,
-            bg=CARD_BG,
-            fg=TEXT,
-            activebackground=CARD_BORDER,
-            activeforeground=TEXT,
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=CARD_BORDER,
-            font=("Bahnschrift SemiBold", 11),
-            padx=12,
-            pady=8,
-            cursor="hand2",
-        )
-        self.reset_button.pack(side="right")
-
-        self.stop_demo_button = tk.Button(
-            header,
-            text="Stop Demo",
-            command=self._stop_demo_mode,
-            bg=CARD_BG,
-            fg=TEXT,
-            activebackground=CARD_BORDER,
-            activeforeground=TEXT,
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=CARD_BORDER,
-            font=("Bahnschrift SemiBold", 11),
-            padx=12,
-            pady=8,
-            cursor="hand2",
-            state="disabled",
-        )
-        self.stop_demo_button.pack(side="right", padx=(0, 8))
-
-        self.start_demo_button = tk.Button(
-            header,
-            text="Start Demo",
-            command=self._start_demo_mode,
-            bg=CARD_BG,
-            fg=TEXT,
-            activebackground=CARD_BORDER,
-            activeforeground=TEXT,
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=CARD_BORDER,
-            font=("Bahnschrift SemiBold", 11),
-            padx=12,
-            pady=8,
-            cursor="hand2",
-        )
-        self.start_demo_button.pack(side="right", padx=(0, 8))
-
-        self.port_pill = tk.Label(
-            header,
-            text=self.port_label,
-            bg=CARD_BG,
-            fg=TEXT,
-            font=("Consolas", 10, "bold"),
-            padx=10,
-            pady=6,
-        )
-        self.port_pill.pack(side="right", padx=(0, 10))
 
         self.throughput_pill = tk.Label(
             header,
             text="-- kbps",
             bg=CARD_BG,
             fg=ACCENT,
-            font=("Consolas", 10, "bold"),
+            font=("Bahnschrift", 9),
             padx=10,
-            pady=6,
+            pady=8,
+            highlightthickness=1,
+            highlightbackground=CARD_BORDER,
         )
-        self.throughput_pill.pack(side="right", padx=(0, 10))
+        self.throughput_pill.pack(side="right")
+
+        header_strip = tk.Frame(header, bg=CARD_BG, highlightthickness=1, highlightbackground=CARD_BORDER, height=34)
+        header_strip.pack(side="left", fill="x", expand=True, anchor="w", padx=(0, 8))
+        header_strip.pack_propagate(False)
+        self.header_strip = header_strip
+        header_text_font = ("Bahnschrift", 10)
+        header_status_font = ("Bahnschrift", 9)
+
+        def pack_header_item(widget):
+            if header_strip.winfo_children():
+                tk.Frame(header_strip, bg=CARD_BORDER, width=1).pack(side="left", fill="y")
+            widget.pack(side="left", padx=0, pady=0)
+
+        self.header_style = ttk.Style(root)
+        try:
+            self.header_style.theme_use("clam")
+        except tk.TclError:
+            pass
+        self.header_style.configure(
+            "Header.TCombobox",
+            fieldbackground=CARD_BG,
+            background=CARD_BG,
+            foreground=TEXT,
+            borderwidth=1,
+            relief="flat",
+            arrowcolor=ACCENT,
+            insertcolor=TEXT,
+            lightcolor=CARD_BORDER,
+            darkcolor=CARD_BORDER,
+            bordercolor=CARD_BORDER,
+            padding=2,
+        )
+        self.header_style.map(
+            "Header.TCombobox",
+            fieldbackground=[("readonly", CARD_BG)],
+            background=[("readonly", CARD_BG)],
+            foreground=[("readonly", TEXT)],
+        )
+
+        self.profile_pill = tk.Label(
+            header_strip,
+            text="PROFILE: Default",
+            bg=CARD_BG,
+            fg=ACCENT,
+            font=header_status_font,
+            padx=10,
+            pady=8,
+        )
+        pack_header_item(self.profile_pill)
+        self._refresh_profile_pill()
+
+        self.profiles_menu_button = tk.Menubutton(
+            header_strip,
+            text="Profiles",
+            bg=CARD_BG,
+            fg=TEXT,
+            activebackground=CARD_HOVER,
+            activeforeground=TEXT,
+            relief="flat",
+            highlightthickness=0,
+            borderwidth=0,
+            font=header_text_font,
+            padx=10,
+            pady=8,
+            cursor="hand2",
+            direction="below",
+        )
+        self.profiles_menu = tk.Menu(
+            self.profiles_menu_button,
+            tearoff=0,
+            bg=CARD_BG,
+            fg=TEXT,
+            activebackground=CARD_BORDER,
+            activeforeground=TEXT,
+        )
+        self.profiles_menu.add_command(label="Open Profile Manager", command=self._open_profile_manager)
+        self.profiles_menu.add_command(label="Save Over Current", command=lambda: self._save_profile(self.current_profile_name))
+        self.profiles_menu.add_command(label="Save Profile As", command=self._save_profile_as)
+        self.profiles_menu_button.config(menu=self.profiles_menu)
+        pack_header_item(self.profiles_menu_button)
+        self._bind_hover(self.profiles_menu_button, CARD_BG, CARD_HOVER, TEXT, TEXT)
+
+        self.settings_button = tk.Button(
+            header_strip,
+            text="Settings",
+            command=self._open_settings_dialog,
+            bg=CARD_BG,
+            fg=TEXT,
+            activebackground=CARD_HOVER,
+            activeforeground=TEXT,
+            relief="flat",
+            highlightthickness=0,
+            borderwidth=0,
+            font=header_text_font,
+            padx=10,
+            pady=8,
+            cursor="hand2",
+        )
+        pack_header_item(self.settings_button)
+        self._bind_hover(self.settings_button, CARD_BG, CARD_HOVER, TEXT, TEXT)
+
+        self.session_menu_button = tk.Menubutton(
+            header_strip,
+            text="Session",
+            bg=CARD_BG,
+            fg=TEXT,
+            activebackground=CARD_HOVER,
+            activeforeground=TEXT,
+            relief="flat",
+            highlightthickness=0,
+            borderwidth=0,
+            font=header_text_font,
+            padx=10,
+            pady=8,
+            cursor="hand2",
+            direction="below",
+        )
+        self.session_menu = tk.Menu(
+            self.session_menu_button,
+            tearoff=0,
+            bg=CARD_BG,
+            fg=TEXT,
+            activebackground=CARD_BORDER,
+            activeforeground=TEXT,
+        )
+        self.session_menu.add_command(label="Reset Min/Max", command=self._reset_metric_bounds)
+        self.session_menu.add_command(label="Ack Alerts", command=self._acknowledge_alerts, state="disabled")
+        self.session_menu.add_separator()
+        self.session_menu.add_command(label="Duplicate Current Tab", command=self._duplicate_current_tab)
+        self.session_menu.add_command(label="Reset Current Tab Layout", command=self._reset_current_tab)
+        self.session_menu.add_command(label="Reset LIVE Tab", command=lambda: self._reset_named_tab("LIVE"))
+        self.session_menu.add_command(label="Reset LOGGING Tab", command=lambda: self._reset_named_tab("LOGGING"))
+        self.session_menu.add_command(label="Reset All Tabs", command=self._reset_all_tabs)
+        self.session_menu.add_separator()
+        self.session_menu.add_command(label="Clear All Graphs", command=self._clear_all_graphs)
+        self.session_menu.add_separator()
+        self.session_menu.add_command(label="Save Workspace As", command=self._export_workspace)
+        self.session_menu.add_command(label="Load Workspace", command=self._import_workspace)
+        self.session_menu_button.config(menu=self.session_menu)
+        pack_header_item(self.session_menu_button)
+        self._bind_hover(self.session_menu_button, CARD_BG, CARD_HOVER, TEXT, TEXT)
+
+        self.logging_menu_button = tk.Menubutton(
+            header_strip,
+            text="Logging",
+            bg=CARD_BG,
+            fg=TEXT,
+            activebackground=CARD_HOVER,
+            activeforeground=TEXT,
+            relief="flat",
+            highlightthickness=0,
+            borderwidth=0,
+            font=header_text_font,
+            padx=10,
+            pady=8,
+            cursor="hand2",
+            direction="below",
+        )
+        self.logging_menu = tk.Menu(
+            self.logging_menu_button,
+            tearoff=0,
+            bg=CARD_BG,
+            fg=TEXT,
+            activebackground=CARD_BORDER,
+            activeforeground=TEXT,
+        )
+        self.logging_menu.add_command(label="Start Logging", command=self._start_logging)
+        self.logging_menu.add_command(label="Stop Logging", command=self._stop_logging, state="disabled")
+        self.logging_menu.add_command(label="Open Log Folder", command=self._open_log_folder)
+        self.logging_menu.add_separator()
+        self.logging_menu.add_command(label="Start Demo", command=self._start_demo_mode)
+        self.logging_menu.add_command(label="Stop Demo", command=self._stop_demo_mode, state="disabled")
+        self.logging_menu_button.config(menu=self.logging_menu)
+        pack_header_item(self.logging_menu_button)
+        self._bind_hover(self.logging_menu_button, CARD_BG, CARD_HOVER, TEXT, TEXT)
+
+        self.connect_button = tk.Button(
+            header_strip,
+            text="Connect",
+            bg=CARD_BG,
+            fg=TEXT,
+            activebackground=CARD_HOVER,
+            activeforeground=TEXT,
+            relief="flat",
+            highlightthickness=0,
+            borderwidth=0,
+            font=header_text_font,
+            padx=10,
+            pady=8,
+            cursor="hand2",
+            command=self._toggle_connection,
+        )
+        pack_header_item(self.connect_button)
+        self._bind_hover(self.connect_button, CARD_BG, CARD_HOVER, TEXT, TEXT)
+
+        self.port_var = tk.StringVar(value=self.settings_model["connection"].get("serial_port", self.port_label))
+        self.port_combo = ttk.Combobox(
+            header_strip,
+            textvariable=self.port_var,
+            state="readonly",
+            width=11,
+            style="Header.TCombobox",
+        )
+        pack_header_item(self.port_combo)
+        self.port_combo.bind("<<ComboboxSelected>>", self._handle_port_selected, add="+")
+
+        self.refresh_ports_button = tk.Button(
+            header_strip,
+            text="↻",
+            bg=CARD_BG,
+            fg=ACCENT,
+            activebackground=CARD_HOVER,
+            activeforeground=ACCENT,
+            relief="flat",
+            highlightthickness=0,
+            borderwidth=0,
+            font=("Bahnschrift", 11),
+            padx=10,
+            pady=8,
+            cursor="hand2",
+            command=self._refresh_port_choices,
+        )
+        pack_header_item(self.refresh_ports_button)
+        self._bind_hover(self.refresh_ports_button, CARD_BG, CARD_HOVER, ACCENT, ACCENT)
+
+        self.logging_pill = tk.Label(
+            header_strip,
+            text="LOG OFF",
+            bg=CARD_BG,
+            fg=MUTED,
+            font=header_status_font,
+            padx=10,
+            pady=8,
+        )
+        pack_header_item(self.logging_pill)
+
+        self.last_alert_pill = tk.Label(
+            header_strip,
+            text="ALERT: NONE",
+            bg=CARD_BG,
+            fg=MUTED,
+            font=header_status_font,
+            padx=10,
+            pady=8,
+        )
+        pack_header_item(self.last_alert_pill)
 
         self.status_pill = tk.Label(
-            header,
+            header_strip,
             text="OFFLINE",
             bg=ACCENT_2,
             fg=TEXT,
-            font=("Consolas", 10, "bold"),
+            font=header_status_font,
             padx=10,
-            pady=6,
+            pady=8,
         )
-        self.status_pill.pack(side="right", padx=(0, 10))
+        pack_header_item(self.status_pill)
+
+
+        self.header_divider = tk.Frame(outer, bg=CARD_BORDER, height=1)
+        self.header_divider.pack(fill="x", pady=(0, GAP_SM))
 
         self.critical_bar = tk.Label(
             outer,
@@ -1192,9 +1488,14 @@ class DashboardApp:
         self.throttle_trend = TrendPanel(self.dashboard, "Throttle Graph")
         self.temp_trend = TrendPanel(self.dashboard, "Temp Graph")
         self.pressure_trend = TrendPanel(self.dashboard, "Pressure Graph")
-        self.custom_trend = CustomTrendPanel(self.dashboard, "Custom Graph", lambda: self._configure_custom_graph("custom_trend"))
+        self.custom_trend_panels = {}
+        for index, panel_name in enumerate(CUSTOM_GRAPH_PANEL_NAMES, start=1):
+            title = "Custom Graph" if index == 1 else f"Custom Graph {index}"
+            widget = CustomTrendPanel(self.dashboard, title, lambda name=panel_name: self._configure_custom_graph(name))
+            self.custom_trend_panels[panel_name] = widget
+            setattr(self, panel_name, widget)
         self.rpm_tach = TachPanel(self.dashboard, "Engine Speed", RPM_MAX)
-        self.rpm_tach.set_logo(self.logo_image)
+        self.rpm_tach.set_logo(self.tach_logo_image)
         self._register_panel("wheel_gauge", self.wheel_gauge)
         self._register_panel("tps_gauge", self.tps_gauge)
         self._register_panel("aps_gauge", self.aps_gauge)
@@ -1218,16 +1519,30 @@ class DashboardApp:
         self._register_panel("throttle_trend", self.throttle_trend)
         self._register_panel("temp_trend", self.temp_trend)
         self._register_panel("pressure_trend", self.pressure_trend)
-        self._register_panel("custom_trend", self.custom_trend)
+        for panel_name, widget in self.custom_trend_panels.items():
+            self._register_panel(panel_name, widget)
         self._register_panel("rpm_tach", self.rpm_tach)
 
-        self._seed_default_tabs()
+        self._initialize_tabs()
+        self.logging_active = bool(self.settings_model["logging"].get("enabled") and self.settings_model["logging"].get("auto_start"))
+        self._update_logging_controls()
+        self._refresh_port_choices()
+        self._update_connection_controls()
+        default_window = self._default_graph_window()
+        self._graph_panel_options = {
+            panel_name: {"paused": False, "window_s": default_window}
+            for panel_name, meta in PANEL_DEFS.items()
+            if meta["section"] == "graphs"
+        }
 
         self.root.after(20, self._poll_lines)
         self.root.after(self.LIVE_REFRESH_MS, self._refresh)
         self.root.bind_all("<KeyPress>", self._handle_secret_keypress, add="+")
+        self.root.bind_all("<Control-z>", self._handle_undo_shortcut, add="+")
         if initial_demo:
             self._start_demo_mode()
+        elif self.settings_model["connection"].get("auto_connect", True):
+            self._connect_serial()
 
     def _register_panel(self, name: str, widget: tk.Widget):
         self.panel_widgets[name] = widget
@@ -1257,10 +1572,537 @@ class DashboardApp:
         widget.bind("<ButtonPress-1>", lambda event, panel=panel_name: self._start_drag(event, panel), add="+")
         widget.bind("<B1-Motion>", lambda event, panel=panel_name: self._drag_panel(event, panel), add="+")
         widget.bind("<ButtonRelease-1>", self._end_drag, add="+")
-        if panel_name == "custom_trend":
-            widget.bind("<Button-3>", lambda event, panel=panel_name: self._show_custom_graph_menu(event, panel), add="+")
+        widget.bind("<Button-3>", lambda event, panel=panel_name: self._show_panel_menu(event, panel), add="+")
         for child in widget.winfo_children():
             self._bind_panel_drag(child, panel_name)
+
+    def _load_persisted_state(self):
+        try:
+            if not self.persisted_state_path.exists():
+                return
+            payload = json.loads(self.persisted_state_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+
+        settings_payload = payload.get("settings")
+        if isinstance(settings_payload, dict):
+            self._merge_settings_model(self.settings_model, settings_payload)
+        profile_name = payload.get("profile_name")
+        if isinstance(profile_name, str) and profile_name.strip():
+            self.current_profile_name = profile_name.strip()
+
+        critical_payload = payload.get("critical_limits")
+        if isinstance(critical_payload, dict):
+            for metric_key, config in critical_payload.items():
+                if metric_key in self.critical_limits and isinstance(config, dict):
+                    if "low" in config:
+                        self.critical_limits[metric_key]["crit_low"] = str(config["low"])
+                    if "high" in config:
+                        self.critical_limits[metric_key]["crit_high"] = str(config["high"])
+                    for field_name in ("warn_low", "warn_high", "crit_low", "crit_high"):
+                        if field_name in config:
+                            self.critical_limits[metric_key][field_name] = str(config[field_name])
+
+        tabs_payload = payload.get("tabs")
+        if isinstance(tabs_payload, list):
+            self._persisted_tabs_payload = tabs_payload
+            try:
+                self._persisted_current_tab_index = max(0, int(payload.get("current_tab_index", 0)))
+            except (TypeError, ValueError):
+                self._persisted_current_tab_index = 0
+
+    def _merge_settings_model(self, target: dict, source: dict):
+        for key, value in source.items():
+            if key not in target:
+                continue
+            if isinstance(target[key], dict) and isinstance(value, dict):
+                self._merge_settings_model(target[key], value)
+            else:
+                target[key] = value
+
+    def _default_custom_graph_titles(self):
+        return {
+            panel_name: ("Custom Graph" if index == 1 else f"Custom Graph {index}")
+            for index, panel_name in enumerate(CUSTOM_GRAPH_PANEL_NAMES, start=1)
+        }
+
+    def _default_custom_graph_config(self):
+        return {panel_name: [] for panel_name in CUSTOM_GRAPH_PANEL_NAMES}
+
+    def _workspace_snapshot_payload(self):
+        return {
+            "profile_name": self.current_profile_name,
+            "settings": json.loads(json.dumps(self.settings_model)),
+            "critical_limits": json.loads(json.dumps(self.critical_limits)),
+            "tabs": json.loads(json.dumps(self._serialize_tabs_payload())),
+            "current_tab_index": max(0, self.tab_order.index(self.current_tab_id)) if self.current_tab_id in self.tab_order else 0,
+        }
+
+    def _push_undo_state(self):
+        snapshot = self._workspace_snapshot_payload()
+        signature = json.dumps(snapshot, sort_keys=True)
+        if signature == self._undo_signature:
+            return
+        self._undo_stack.append(snapshot)
+        if len(self._undo_stack) > self._max_undo:
+            self._undo_stack.pop(0)
+        self._undo_signature = signature
+
+    def _handle_undo_shortcut(self, _event=None):
+        focused = self.root.focus_get()
+        if focused is not None and focused.winfo_class() in {"Entry", "Text", "TEntry", "Spinbox", "TCombobox"}:
+            return
+        self._undo_last_action()
+        return "break"
+
+    def _undo_last_action(self):
+        if not self._undo_stack:
+            return
+        snapshot = self._undo_stack.pop()
+        self._apply_workspace_payload(snapshot)
+        self._undo_signature = json.dumps(self._workspace_snapshot_payload(), sort_keys=True)
+
+    def _apply_workspace_payload(self, payload: dict):
+        self.current_profile_name = str(payload.get("profile_name", self.current_profile_name or "Default")).strip() or "Default"
+        self.settings_model = self._build_default_settings_model()
+        self._merge_settings_model(self.settings_model, payload.get("settings", {}))
+        for metric_key, bounds in self.critical_limits.items():
+            bounds["warn_low"] = ""
+            bounds["warn_high"] = ""
+            bounds["crit_low"] = ""
+            bounds["crit_high"] = ""
+        critical_payload = payload.get("critical_limits", {})
+        if isinstance(critical_payload, dict):
+            for metric_key, config in critical_payload.items():
+                if metric_key in self.critical_limits and isinstance(config, dict):
+                    for field_name in ("warn_low", "warn_high", "crit_low", "crit_high"):
+                        if field_name in config:
+                            self.critical_limits[metric_key][field_name] = str(config[field_name])
+        self._persisted_tabs_payload = payload.get("tabs") if isinstance(payload.get("tabs"), list) else None
+        try:
+            self._persisted_current_tab_index = max(0, int(payload.get("current_tab_index", 0)))
+        except (TypeError, ValueError):
+            self._persisted_current_tab_index = 0
+        if not self._restore_tabs_from_persistence():
+            self.tabs.clear()
+            self.tab_order.clear()
+            self.current_tab_id = None
+            self._seed_default_tabs()
+        self.logging_active = bool(self.settings_model["logging"].get("enabled") and self.settings_model["logging"].get("auto_start"))
+        self._close_log_session()
+        self._update_logging_controls()
+        self._render_tab_buttons()
+        self._populate_drawer()
+        self._layout_panels()
+        self._refresh_profile_pill()
+        self._save_persisted_state()
+
+    def _sanitize_layout_payload(self, payload):
+        layout = self._default_layout_copy()
+        if not isinstance(payload, dict):
+            return layout
+        for panel_name, default_spec in layout.items():
+            incoming = payload.get(panel_name)
+            if not isinstance(incoming, dict):
+                continue
+            spec = default_spec.copy()
+            for field_name in ("x", "y", "w", "h"):
+                try:
+                    spec[field_name] = float(incoming.get(field_name, spec[field_name]))
+                except (TypeError, ValueError):
+                    pass
+            spec["x"] = max(0.0, min(1.0, spec["x"]))
+            spec["y"] = max(0.0, min(1.0, spec["y"]))
+            spec["w"] = max(0.05, min(1.0, spec["w"]))
+            spec["h"] = max(0.05, min(1.0, spec["h"]))
+            spec["visible"] = bool(incoming.get("visible", spec.get("visible", False)))
+            layout[panel_name] = spec
+        return layout
+
+    def _sanitize_custom_graphs_payload(self, payload):
+        cleaned = self._default_custom_graph_config()
+        if not isinstance(payload, dict):
+            return cleaned
+        for panel_name in CUSTOM_GRAPH_PANEL_NAMES:
+            entries = payload.get(panel_name, [])
+            if not isinstance(entries, list):
+                continue
+            for entry in entries:
+                if not isinstance(entry, dict):
+                    continue
+                key = entry.get("key")
+                color = entry.get("color")
+                if key in GRAPH_METRIC_OPTIONS and isinstance(color, str) and color.strip():
+                    cleaned[panel_name].append({"key": key, "color": color})
+        return cleaned
+
+    def _sanitize_custom_graph_titles_payload(self, payload):
+        cleaned = self._default_custom_graph_titles()
+        if not isinstance(payload, dict):
+            return cleaned
+        for panel_name in CUSTOM_GRAPH_PANEL_NAMES:
+            title = payload.get(panel_name)
+            if isinstance(title, str) and title.strip():
+                cleaned[panel_name] = title.strip()
+        return cleaned
+
+    def _restore_tabs_from_persistence(self):
+        if not self._persisted_tabs_payload:
+            return False
+
+        self.tabs.clear()
+        self.tab_order.clear()
+        self.current_tab_id = None
+
+        for index, tab_payload in enumerate(self._persisted_tabs_payload, start=1):
+            if not isinstance(tab_payload, dict):
+                continue
+            name = str(tab_payload.get("name", f"TAB{index}")).strip() or f"TAB{index}"
+            tab_id = f"tab_{index}"
+            self.tabs[tab_id] = {
+                "name": name,
+                "layout": self._sanitize_layout_payload(tab_payload.get("layout")),
+                "custom_graphs": self._sanitize_custom_graphs_payload(tab_payload.get("custom_graphs")),
+                "custom_graph_titles": self._sanitize_custom_graph_titles_payload(tab_payload.get("custom_graph_titles")),
+            }
+            self.tab_order.append(tab_id)
+
+        if not self.tab_order:
+            return False
+
+        selected_index = min(self._persisted_current_tab_index, len(self.tab_order) - 1)
+        self.current_tab_id = self.tab_order[selected_index]
+        self._render_tab_buttons()
+        self._populate_drawer()
+        self._layout_panels()
+        return True
+
+    def _serialize_tabs_payload(self):
+        tabs_payload = []
+        for tab_id in self.tab_order:
+            tab = self.tabs.get(tab_id)
+            if not tab:
+                continue
+            tabs_payload.append(
+                {
+                    "name": tab.get("name", tab_id),
+                    "layout": tab.get("layout", {}),
+                    "custom_graphs": tab.get("custom_graphs", self._default_custom_graph_config()),
+                    "custom_graph_titles": tab.get("custom_graph_titles", self._default_custom_graph_titles()),
+                }
+            )
+        return tabs_payload
+
+    def _save_persisted_state(self):
+        payload = {
+            "profile_name": self.current_profile_name,
+            "settings": self.settings_model,
+            "critical_limits": {
+                metric_key: {
+                    "warn_low": bounds.get("warn_low", ""),
+                    "warn_high": bounds.get("warn_high", ""),
+                    "crit_low": bounds.get("crit_low", ""),
+                    "crit_high": bounds.get("crit_high", ""),
+                }
+                for metric_key, bounds in self.critical_limits.items()
+            },
+            "tabs": self._serialize_tabs_payload(),
+            "current_tab_index": max(0, self.tab_order.index(self.current_tab_id)) if self.current_tab_id in self.tab_order else 0,
+        }
+        try:
+            self.persisted_state_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _refresh_profile_pill(self):
+        if hasattr(self, "profile_pill"):
+            self.profile_pill.config(text=f"PROFILE: {self.current_profile_name}")
+
+    def _apply_dark_title_bar(self, window):
+        def colorref(hex_color: str) -> ctypes.c_int:
+            value = hex_color.lstrip("#")
+            red = int(value[0:2], 16)
+            green = int(value[2:4], 16)
+            blue = int(value[4:6], 16)
+            return ctypes.c_int(red | (green << 8) | (blue << 16))
+
+        def apply_once():
+            try:
+                window.update_idletasks()
+                hwnd = int(window.winfo_id())
+                enabled = ctypes.c_int(1)
+                for attribute in (20, 19):
+                    try:
+                        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                            hwnd,
+                            attribute,
+                            ctypes.byref(enabled),
+                            ctypes.sizeof(enabled),
+                        )
+                    except Exception:
+                        pass
+
+                caption_color = colorref(BACKGROUND)
+                text_color = colorref(TEXT)
+                border_color = colorref(CARD_BORDER)
+                for attribute, value in ((35, caption_color), (36, text_color), (34, border_color)):
+                    try:
+                        ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                            hwnd,
+                            attribute,
+                            ctypes.byref(value),
+                            ctypes.sizeof(value),
+                        )
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        apply_once()
+        try:
+            window.after(50, apply_once)
+            window.after(250, apply_once)
+        except Exception:
+            pass
+
+    def _bind_hover(self, widget, normal_bg, hover_bg, normal_fg=None, hover_fg=None):
+        def on_enter(_event=None):
+            kwargs = {"bg": hover_bg}
+            if hover_fg is not None:
+                kwargs["fg"] = hover_fg
+            try:
+                widget.config(**kwargs)
+            except tk.TclError:
+                pass
+
+        def on_leave(_event=None):
+            kwargs = {"bg": normal_bg}
+            if normal_fg is not None:
+                kwargs["fg"] = normal_fg
+            try:
+                widget.config(**kwargs)
+            except tk.TclError:
+                pass
+
+        widget.bind("<Enter>", on_enter, add="+")
+        widget.bind("<Leave>", on_leave, add="+")
+
+    def _available_serial_ports(self):
+        discovered = []
+        if list_ports is not None:
+            try:
+                discovered = [port.device for port in list_ports.comports()]
+            except Exception:
+                discovered = []
+        current = str(self.settings_model.get("connection", {}).get("serial_port", "")).strip()
+        if current and current not in discovered:
+            discovered.append(current)
+        if not discovered:
+            discovered = [current or self.port_label or "COM12"]
+        return sorted(discovered)
+
+    def _refresh_port_choices(self):
+        self.port_choices = self._available_serial_ports()
+        if hasattr(self, "port_combo"):
+            self.port_combo.configure(values=self.port_choices)
+            current = self.port_var.get().strip()
+            if current not in self.port_choices and self.port_choices:
+                self.port_var.set(self.port_choices[0])
+        return self.port_choices
+
+    def _handle_port_selected(self, _event=None):
+        selected = self.port_var.get().strip()
+        if selected:
+            self.settings_model["connection"]["serial_port"] = selected
+            self.port_label = selected
+            self._save_persisted_state()
+
+    def _toggle_connection(self):
+        if self.serial_worker is not None:
+            self._disconnect_serial()
+        else:
+            self._connect_serial()
+
+    def _connect_serial(self):
+        if self.initial_demo or self.demo_running:
+            return
+        port = self.port_var.get().strip() or self.settings_model["connection"].get("serial_port", "").strip()
+        if not port:
+            return
+        try:
+            baudrate = int(str(self.settings_model["connection"].get("baud_rate", self.baudrate)).strip())
+        except ValueError:
+            baudrate = self.baudrate
+        self._disconnect_serial(save_state=False)
+        self.settings_model["connection"]["serial_port"] = port
+        self.settings_model["connection"]["baud_rate"] = str(baudrate)
+        self.port_label = port
+        self.connection_state = "connecting"
+        self._last_serial_error = ""
+        self.state.last_update_monotonic = 0.0
+        self.serial_worker = SerialWorker(port, baudrate, self.line_queue, False)
+        self.serial_worker.start()
+        self._update_connection_controls()
+        self._save_persisted_state()
+
+    def _disconnect_serial(self, save_state: bool = True):
+        if self.serial_worker is not None:
+            self.serial_worker.stop()
+            self.serial_worker = None
+        self.connection_state = "disconnected"
+        self.state.last_update_monotonic = 0.0
+        self._last_serial_error = ""
+        self._update_connection_controls()
+        if save_state:
+            self._save_persisted_state()
+
+    def _update_connection_controls(self):
+        if not hasattr(self, "connect_button"):
+            return
+        connected = self.serial_worker is not None
+        self.connect_button.config(
+            text="Disconnect" if connected else "Connect",
+            fg=WARNING if connected else TEXT,
+        )
+
+    def _sanitize_profile_name(self, name: str) -> str:
+        cleaned = re.sub(r"[^A-Za-z0-9 _-]+", "", (name or "").strip())
+        cleaned = re.sub(r"\s+", " ", cleaned).strip()
+        return cleaned[:40]
+
+    def _profile_path(self, profile_name: str) -> Path:
+        safe_name = self._sanitize_profile_name(profile_name).replace(" ", "_")
+        return self.profiles_dir / f"{safe_name}.json"
+
+    def _available_profiles(self):
+        if not self.profiles_dir.exists():
+            return []
+        profiles = []
+        for path in sorted(self.profiles_dir.glob("*.json")):
+            try:
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                label = str(payload.get("profile_name", path.stem.replace("_", " "))).strip() or path.stem.replace("_", " ")
+            except (OSError, json.JSONDecodeError):
+                label = path.stem.replace("_", " ")
+            profiles.append((label, path))
+        return profiles
+
+    def _save_profile(self, profile_name: str):
+        normalized = self._sanitize_profile_name(profile_name)
+        if not normalized:
+            return False
+        self.profiles_dir.mkdir(parents=True, exist_ok=True)
+        previous = self.current_profile_name
+        self.current_profile_name = normalized
+        payload = self._workspace_snapshot_payload()
+        self.current_profile_name = previous
+        payload["profile_name"] = normalized
+        try:
+            self._profile_path(normalized).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            return False
+        self.current_profile_name = normalized
+        self._refresh_profile_pill()
+        self._save_persisted_state()
+        return True
+
+    def _save_profile_as(self, initial_name: str | None = None):
+        proposed = initial_name or self.current_profile_name or "Profile"
+        name = simpledialog.askstring("Save Profile", "Profile name:", initialvalue=proposed, parent=self.root)
+        if not name:
+            return False
+        self._push_undo_state()
+        return self._save_profile(name)
+
+    def _load_profile(self, profile_name: str):
+        path = self._profile_path(profile_name)
+        if not path.exists():
+            return False
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return False
+        self._push_undo_state()
+        self._apply_workspace_payload(payload)
+        return True
+
+    def _delete_profile(self, profile_name: str):
+        path = self._profile_path(profile_name)
+        if not path.exists():
+            return False
+        try:
+            path.unlink()
+        except OSError:
+            return False
+        if self.current_profile_name == profile_name:
+            self.current_profile_name = "Default"
+            self._refresh_profile_pill()
+            self._save_persisted_state()
+        return True
+
+    def _open_profile_manager(self):
+        dialog = tk.Toplevel(self.root)
+        dialog.title("Profiles")
+        dialog.configure(bg=CARD_BG)
+        dialog.transient(self.root)
+        dialog.grab_set()
+        dialog.resizable(False, False)
+        self._apply_dark_title_bar(dialog)
+
+        tk.Label(dialog, text="Saved Profiles", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift SemiBold", 14)).pack(anchor="w", padx=14, pady=(14, 8))
+
+        body = tk.Frame(dialog, bg=CARD_BG)
+        body.pack(fill="both", expand=True, padx=14, pady=(0, 12))
+
+        listbox = tk.Listbox(
+            body,
+            width=34,
+            height=10,
+            bg=BACKGROUND,
+            fg=TEXT,
+            selectbackground=ACCENT_2,
+            selectforeground=TEXT,
+            highlightthickness=1,
+            highlightbackground=CARD_BORDER,
+            font=("Bahnschrift", 11),
+            activestyle="none",
+            relief="flat",
+        )
+        listbox.pack(side="left", fill="both", expand=True)
+        scrollbar = tk.Scrollbar(body, orient="vertical", command=listbox.yview, bg=CARD_BG, troughcolor=BACKGROUND, activebackground=CARD_BORDER)
+        scrollbar.pack(side="right", fill="y")
+        listbox.configure(yscrollcommand=scrollbar.set)
+
+        profile_names = []
+
+        def refresh_profiles(select_name: str | None = None):
+            nonlocal profile_names
+            profile_names = [label for label, _ in self._available_profiles()]
+            listbox.delete(0, tk.END)
+            for name in profile_names:
+                listbox.insert(tk.END, name)
+            target = select_name or self.current_profile_name
+            if target in profile_names:
+                idx = profile_names.index(target)
+                listbox.selection_set(idx)
+                listbox.see(idx)
+
+        def selected_profile():
+            if not listbox.curselection():
+                return None
+            return profile_names[listbox.curselection()[0]]
+
+        actions = tk.Frame(dialog, bg=CARD_BG)
+        actions.pack(fill="x", padx=14, pady=(0, 14))
+
+        tk.Button(actions, text="Save Current As", command=lambda: (self._save_profile_as(), refresh_profiles(self.current_profile_name)), bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Button(actions, text="Save Over Current", command=lambda: (self._save_profile(self.current_profile_name), refresh_profiles(self.current_profile_name)), bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Button(actions, text="Load Selected", command=lambda: (self._load_profile(selected_profile()) if selected_profile() else None, refresh_profiles(self.current_profile_name)), bg=ACCENT_2, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Button(actions, text="Delete Selected", command=lambda: (self._delete_profile(selected_profile()) if selected_profile() else None, refresh_profiles(self.current_profile_name)), bg=CARD_BORDER, fg=TEXT, activebackground=DANGER, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left")
+
+        tk.Label(dialog, text="Profiles save the current settings, alerts, tabs, layouts, and custom graph setup.", bg=CARD_BG, fg=MUTED, font=("Bahnschrift", 10), justify="left").pack(anchor="w", padx=14, pady=(0, 12))
+
+        refresh_profiles()
 
     def _default_layout_copy(self):
         layout = {}
@@ -1332,26 +2174,140 @@ class DashboardApp:
         self._populate_drawer()
         self._layout_panels()
 
+    def _initialize_tabs(self):
+        if self._restore_tabs_from_persistence():
+            return
+        self._seed_default_tabs()
+        self._save_persisted_state()
+
     def _create_tab(self, name: str, layout: dict, select: bool):
         tab_id = f"tab_{len(self.tab_order) + 1}"
         self.tabs[tab_id] = {
             "name": name,
             "layout": layout,
-            "custom_graphs": {"custom_trend": []},
-            "custom_graph_titles": {"custom_trend": "Custom Graph"},
+            "custom_graphs": self._default_custom_graph_config(),
+            "custom_graph_titles": self._default_custom_graph_titles(),
         }
         self.tab_order.append(tab_id)
         if select or self.current_tab_id is None:
             self.current_tab_id = tab_id
         return tab_id
 
+    def _duplicate_current_tab(self):
+        if self.current_tab_id is None or self.current_tab_id not in self.tabs:
+            return
+        self._push_undo_state()
+        source = self.tabs[self.current_tab_id]
+        new_name = f"{source['name']} Copy"
+        new_layout = json.loads(json.dumps(source.get("layout", {})))
+        new_tab_id = self._create_tab(new_name, new_layout, select=True)
+        self.tabs[new_tab_id]["custom_graphs"] = json.loads(json.dumps(source.get("custom_graphs", self._default_custom_graph_config())))
+        self.tabs[new_tab_id]["custom_graph_titles"] = json.loads(json.dumps(source.get("custom_graph_titles", self._default_custom_graph_titles())))
+        self._render_tab_buttons()
+        self._populate_drawer()
+        self._layout_panels()
+        self._save_persisted_state()
+
+    def _reset_named_tab(self, tab_name: str):
+        target_id = None
+        for tab_id in self.tab_order:
+            if self.tabs.get(tab_id, {}).get("name", "").upper() == tab_name.upper():
+                target_id = tab_id
+                break
+        if target_id is None:
+            return
+        self._push_undo_state()
+        if tab_name.upper() == "LIVE":
+            self.tabs[target_id]["layout"] = self._live_layout_copy()
+        elif tab_name.upper() == "LOGGING":
+            self.tabs[target_id]["layout"] = self._logging_layout_copy()
+        else:
+            self.tabs[target_id]["layout"] = self._blank_layout_copy()
+        self.tabs[target_id]["custom_graphs"] = self._default_custom_graph_config()
+        self.tabs[target_id]["custom_graph_titles"] = self._default_custom_graph_titles()
+        if self.current_tab_id == target_id:
+            self._layout_panels()
+            self._populate_drawer()
+        self._save_persisted_state()
+
+    def _reset_current_tab(self):
+        if self.current_tab_id is None:
+            return
+        current_name = self.tabs.get(self.current_tab_id, {}).get("name", "")
+        if current_name.upper() in {"LIVE", "LOGGING"}:
+            self._reset_named_tab(current_name)
+            return
+        self._push_undo_state()
+        self.tabs[self.current_tab_id]["layout"] = self._blank_layout_copy()
+        self.tabs[self.current_tab_id]["custom_graphs"] = self._default_custom_graph_config()
+        self.tabs[self.current_tab_id]["custom_graph_titles"] = self._default_custom_graph_titles()
+        self._layout_panels()
+        self._populate_drawer()
+        self._save_persisted_state()
+
+    def _reset_all_tabs(self):
+        self._push_undo_state()
+        self.tabs.clear()
+        self.tab_order.clear()
+        self.current_tab_id = None
+        self._seed_default_tabs()
+        self.latched_alerts.clear()
+        self._save_persisted_state()
+
+    def _export_workspace(self):
+        destination = filedialog.asksaveasfilename(
+            parent=self.root,
+            title="Export Workspace",
+            initialfile="telemetry_workspace.json",
+            defaultextension=".json",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not destination:
+            return
+        payload = {
+            "profile_name": self.current_profile_name,
+            "settings": self.settings_model,
+            "critical_limits": {
+                metric_key: {
+                    "warn_low": bounds.get("warn_low", ""),
+                    "warn_high": bounds.get("warn_high", ""),
+                    "crit_low": bounds.get("crit_low", ""),
+                    "crit_high": bounds.get("crit_high", ""),
+                }
+                for metric_key, bounds in self.critical_limits.items()
+            },
+            "tabs": self._serialize_tabs_payload(),
+            "current_tab_index": max(0, self.tab_order.index(self.current_tab_id)) if self.current_tab_id in self.tab_order else 0,
+        }
+        try:
+            Path(destination).write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        except OSError:
+            pass
+
+    def _import_workspace(self):
+        source = filedialog.askopenfilename(
+            parent=self.root,
+            title="Import Workspace",
+            filetypes=[("JSON files", "*.json"), ("All files", "*.*")],
+        )
+        if not source:
+            return
+        try:
+            payload = json.loads(Path(source).read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return
+        self._push_undo_state()
+        self._apply_workspace_payload(payload)
+
     def _add_tab(self, initial: bool = False):
         tab_index = len(self.tab_order) + 1
         layout = self._live_layout_copy() if initial else self._blank_layout_copy()
+        self._push_undo_state()
         self._create_tab(f"TAB{tab_index}", layout, select=True)
         self._render_tab_buttons()
         self._populate_drawer()
         self._layout_panels()
+        self._save_persisted_state()
 
     def _select_tab(self, tab_id: str):
         if tab_id not in self.tabs:
@@ -1360,6 +2316,7 @@ class DashboardApp:
         self._render_tab_buttons()
         self._populate_drawer()
         self._layout_panels()
+        self._save_persisted_state()
 
     def _render_tab_buttons(self):
         signature = tuple(self.tab_order)
@@ -1373,19 +2330,19 @@ class DashboardApp:
             for tab_id in self.tab_order:
                 button = tk.Frame(
                     self.tab_bar,
-                    bg=BACKGROUND,
+                    bg=CARD_BG,
                     highlightthickness=1,
                     highlightbackground=CARD_BORDER,
                 )
-                button.pack(side="left", padx=(0, 8))
+                button.pack(side="left", padx=(0, GAP_SM))
                 label = tk.Label(
                     button,
                     text=self.tabs[tab_id]["name"],
-                    bg=BACKGROUND,
+                    bg=CARD_BG,
                     fg=MUTED,
-                    font=("Bahnschrift SemiBold", 11),
-                    padx=14,
-                    pady=6,
+                    font=LABEL_FONT,
+                    padx=16,
+                    pady=7,
                     cursor="hand2",
                 )
                 label.pack()
@@ -1393,6 +2350,7 @@ class DashboardApp:
                     widget.bind("<Button-1>", lambda event, t=tab_id: self._select_tab(t))
                     widget.bind("<Double-Button-1>", lambda event, t=tab_id: self._start_tab_rename(t))
                     widget.bind("<Button-3>", lambda event, t=tab_id: self._show_tab_menu(event, t))
+                self._bind_hover(label, CARD_BG, CARD_HOVER, MUTED, TEXT)
                 self.tab_buttons[tab_id] = button
                 self.tab_labels[tab_id] = label
 
@@ -1402,27 +2360,28 @@ class DashboardApp:
                 command=self._add_tab,
                 bg=CARD_BG,
                 fg=ACCENT,
-                activebackground=CARD_BG,
+                activebackground=CARD_HOVER,
                 activeforeground=ACCENT,
                 relief="flat",
                 highlightthickness=1,
                 highlightbackground=CARD_BORDER,
                 font=("Bahnschrift Bold", 12),
                 padx=12,
-                pady=6,
+                pady=7,
                 cursor="hand2",
             )
             plus.pack(side="left")
+            self._bind_hover(plus, CARD_BG, CARD_HOVER, ACCENT, ACCENT)
             self._tab_signature = signature
 
         for tab_id in self.tab_order:
             is_active = tab_id == self.current_tab_id
             button = self.tab_buttons[tab_id]
             label = self.tab_labels[tab_id]
-            button.config(bg=CARD_BG if is_active else BACKGROUND)
+            button.config(bg=ACCENT_2 if is_active else CARD_BG, highlightbackground=ACCENT_2 if is_active else CARD_BORDER)
             label.config(
                 text=self.tabs[tab_id]["name"],
-                bg=CARD_BG if is_active else BACKGROUND,
+                bg=ACCENT_2 if is_active else CARD_BG,
                 fg=TEXT if is_active else MUTED,
             )
 
@@ -1441,12 +2400,12 @@ class DashboardApp:
     def _current_custom_graphs(self):
         if self.current_tab_id is None:
             return {}
-        return self.tabs[self.current_tab_id].setdefault("custom_graphs", {"custom_trend": []})
+        return self.tabs[self.current_tab_id].setdefault("custom_graphs", self._default_custom_graph_config())
 
     def _current_custom_graph_titles(self):
         if self.current_tab_id is None:
             return {}
-        return self.tabs[self.current_tab_id].setdefault("custom_graph_titles", {"custom_trend": "Custom Graph"})
+        return self.tabs[self.current_tab_id].setdefault("custom_graph_titles", self._default_custom_graph_titles())
 
     def _layout_panels(self):
         layout = self._current_layout()
@@ -1485,6 +2444,7 @@ class DashboardApp:
             return
         if not layout[panel_name].get("visible", True):
             return
+        self._push_undo_state()
         self._drag_state = {
             "panel": panel_name,
             "root_x": event.x_root,
@@ -1507,8 +2467,11 @@ class DashboardApp:
         self._layout_panels()
 
     def _end_drag(self, _event=None):
+        should_persist = self._drag_state is not None or self._resize_state is not None
         self._drag_state = None
         self._resize_state = None
+        if should_persist:
+            self._save_persisted_state()
 
     def _start_resize(self, event, panel_name: str):
         if not self.edit_mode:
@@ -1516,6 +2479,7 @@ class DashboardApp:
         layout = self._current_layout()
         if panel_name not in layout:
             return
+        self._push_undo_state()
         self._resize_state = {
             "panel": panel_name,
             "root_x": event.x_root,
@@ -1542,16 +2506,20 @@ class DashboardApp:
     def _hide_panel(self, panel_name: str):
         layout = self._current_layout()
         if panel_name in layout:
+            self._push_undo_state()
             layout[panel_name]["visible"] = False
             self._layout_panels()
             self._populate_drawer()
+            self._save_persisted_state()
 
     def _show_panel(self, panel_name: str):
         layout = self._current_layout()
         if panel_name in layout:
+            self._push_undo_state()
             layout[panel_name]["visible"] = True
             self._layout_panels()
             self._populate_drawer()
+            self._save_persisted_state()
 
     def _configure_custom_graph(self, panel_name: str):
         current_entries = self._current_custom_graphs().get(panel_name, [])
@@ -1563,6 +2531,7 @@ class DashboardApp:
         dialog.transient(self.root)
         dialog.grab_set()
         dialog.resizable(False, False)
+        self._apply_dark_title_bar(dialog)
 
         tk.Label(
             dialog,
@@ -1630,11 +2599,13 @@ class DashboardApp:
         actions.pack(fill="x", padx=14, pady=(12, 14))
 
         def save_and_close():
+            self._push_undo_state()
             selected = []
             for metric_key in GRAPH_METRIC_OPTIONS:
                 if selections[metric_key].get():
                     selected.append({"key": metric_key, "color": colors[metric_key].get()})
             self._current_custom_graphs()[panel_name] = selected
+            self._save_persisted_state()
             dialog.destroy()
             if self._panel_visible(panel_name):
                 self._last_graph_refresh_monotonic = 0.0
@@ -1675,10 +2646,11 @@ class DashboardApp:
         dialog.wait_window()
 
     def _rename_custom_graph(self, panel_name: str):
-        current_title = self._current_custom_graph_titles().get(panel_name, "Custom Graph")
+        current_title = self._current_custom_graph_titles().get(panel_name, self._default_custom_graph_titles().get(panel_name, "Custom Graph"))
         new_name = simpledialog.askstring("Rename Graph", "Graph name:", initialvalue=current_title, parent=self.root)
         if not new_name:
             return
+        self._push_undo_state()
         updated = new_name.strip() or current_title
         self._current_custom_graph_titles()[panel_name] = updated
         widget = self.panel_widgets.get(panel_name)
@@ -1686,12 +2658,31 @@ class DashboardApp:
             widget.title = updated
             if self._panel_visible(panel_name):
                 widget._draw()
+        self._save_persisted_state()
+
+    def _show_panel_menu(self, event, panel_name: str):
+        menu = tk.Menu(self.root, tearoff=0, bg=CARD_BG, fg=TEXT, activebackground=CARD_BORDER, activeforeground=TEXT)
+        if panel_name in CUSTOM_GRAPH_PANEL_NAMES:
+            menu.add_command(label="Rename Graph", command=lambda p=panel_name: self._rename_custom_graph(p))
+            menu.add_command(label="Edit Metrics", command=lambda p=panel_name: self._configure_custom_graph(p))
+            menu.add_separator()
+        if PANEL_DEFS.get(panel_name, {}).get("section") == "graphs":
+            paused = self._graph_panel_options.get(panel_name, {}).get("paused", False)
+            menu.add_command(
+                label="Resume Graph" if paused else "Pause Graph",
+                command=lambda p=panel_name: self._set_graph_paused(p, not self._graph_panel_options.get(p, {}).get("paused", False)),
+            )
+            menu.add_command(label="Clear Graph", command=lambda p=panel_name: self._clear_graph(p))
+            window_menu = tk.Menu(menu, tearoff=0, bg=CARD_BG, fg=TEXT, activebackground=CARD_BORDER, activeforeground=TEXT)
+            for seconds in (5, 10, 30, 60):
+                window_menu.add_command(label=f"{seconds}s", command=lambda s=seconds, p=panel_name: self._set_graph_window(p, s))
+            menu.add_cascade(label="Time Window", menu=window_menu)
+            menu.add_separator()
+        menu.add_command(label="Delete Container", command=lambda p=panel_name: self._hide_panel(p))
+        menu.tk_popup(event.x_root, event.y_root)
 
     def _show_custom_graph_menu(self, event, panel_name: str):
-        menu = tk.Menu(self.root, tearoff=0, bg=CARD_BG, fg=TEXT, activebackground=CARD_BORDER, activeforeground=TEXT)
-        menu.add_command(label="Rename Graph", command=lambda p=panel_name: self._rename_custom_graph(p))
-        menu.add_command(label="Edit Metrics", command=lambda p=panel_name: self._configure_custom_graph(p))
-        menu.tk_popup(event.x_root, event.y_root)
+        self._show_panel_menu(event, panel_name)
 
     def _build_default_settings_model(self):
         empty_frame = lambda frame_id, id_position="0", id_decimal="0": {
@@ -1736,6 +2727,47 @@ class DashboardApp:
             ],
         }
         return {
+            "connection": {
+                "serial_port": "COM12",
+                "baud_rate": "115200",
+                "auto_connect": True,
+                "reconnect": True,
+                "launch_demo": False,
+            },
+            "logging": {
+                "enabled": False,
+                "file_path": "",
+                "format": "CSV",
+                "auto_start": False,
+                "append_mode": True,
+                "auto_name": True,
+                "metrics": "rpm,tps,aps,lambda1",
+                "interval_ms": "100",
+            },
+            "graphs": {
+                "history_length": "180",
+                "auto_scale": True,
+                "show_grid": True,
+                "show_axis_labels": True,
+                "custom_graph_max_metrics": "4",
+                "time_window_s": "30",
+            },
+            "demo": {
+                "speed": "1.0",
+                "rpm_min": "1200",
+                "rpm_max": "11000",
+                "temp_min": "75",
+                "temp_max": "110",
+                "pressure_min": "20",
+                "pressure_max": "90",
+            },
+            "advanced": {
+                "developer_mode": False,
+                "raw_frame_debug": False,
+            },
+            "alerts": {
+                "latching": False,
+            },
             "mode": {
                 "can_module": "CAN 2",
                 "mode": "User Defined",
@@ -1763,8 +2795,9 @@ class DashboardApp:
         for metric_key, bounds in self.critical_limit_vars.items():
             if metric_key not in self.critical_limits:
                 continue
-            self.critical_limits[metric_key]["low"] = bounds["low"].get().strip()
-            self.critical_limits[metric_key]["high"] = bounds["high"].get().strip()
+            for field_name in ("warn_low", "warn_high", "crit_low", "crit_high"):
+                if field_name in bounds:
+                    self.critical_limits[metric_key][field_name] = bounds[field_name].get().strip()
 
     def _metric_current_value(self, metric_key: str):
         metric = getattr(self.state, metric_key, None)
@@ -1776,29 +2809,434 @@ class DashboardApp:
             return float(metric.rendered_value)
         return None
 
-    def _active_critical_alerts(self):
+    def _active_alert_state(self):
         self._sync_critical_limits_from_vars()
-        alerts = []
+        warning_alerts = []
+        critical_alerts = []
         for metric_key, bounds in self.critical_limits.items():
             value = self._metric_current_value(metric_key)
             if value is None:
                 continue
             label = bounds["label"]
-            low_raw = bounds.get("low", "")
-            high_raw = bounds.get("high", "")
+            thresholds = {}
+            for field_name in ("warn_low", "warn_high", "crit_low", "crit_high"):
+                raw = bounds.get(field_name, "")
+                try:
+                    thresholds[field_name] = float(raw) if str(raw).strip() != "" else None
+                except ValueError:
+                    thresholds[field_name] = None
+
+            is_critical = False
+            if thresholds["crit_low"] is not None and value < thresholds["crit_low"]:
+                critical_alerts.append(f"{label} low")
+                is_critical = True
+            if thresholds["crit_high"] is not None and value > thresholds["crit_high"]:
+                critical_alerts.append(f"{label} high")
+                is_critical = True
+            if is_critical:
+                continue
+            if thresholds["warn_low"] is not None and value < thresholds["warn_low"]:
+                warning_alerts.append(f"{label} low")
+            if thresholds["warn_high"] is not None and value > thresholds["warn_high"]:
+                warning_alerts.append(f"{label} high")
+
+        latching_enabled = bool(self.settings_model.get("alerts", {}).get("latching"))
+        if latching_enabled:
+            for alert_text in warning_alerts:
+                self.latched_alerts.setdefault(alert_text, "warning")
+            for alert_text in critical_alerts:
+                self.latched_alerts[alert_text] = "critical"
+            active_map = dict(self.latched_alerts)
+            for alert_text in warning_alerts:
+                active_map.setdefault(alert_text, "warning")
+            for alert_text in critical_alerts:
+                active_map[alert_text] = "critical"
+        else:
+            self.latched_alerts.clear()
+            active_map = {alert_text: "warning" for alert_text in warning_alerts}
+            for alert_text in critical_alerts:
+                active_map[alert_text] = "critical"
+
+        if any(level == "critical" for level in active_map.values()):
+            level = "critical"
+        elif active_map:
+            level = "warning"
+        else:
+            level = None
+        return level, list(active_map.keys())
+
+    def _acknowledge_alerts(self):
+        self.latched_alerts.clear()
+        self._refresh()
+
+    def _set_menu_entry_state(self, menu, label: str, state: str):
+        cache_key = (str(menu), label)
+        if self._menu_entry_state_cache.get(cache_key) == state:
+            return
+        try:
+            current_state = menu.entrycget(label, "state")
+            if current_state == state:
+                self._menu_entry_state_cache[cache_key] = state
+                return
+            menu.entryconfig(label, state=state)
+            self._menu_entry_state_cache[cache_key] = state
+        except tk.TclError:
+            pass
+
+    def _update_demo_controls(self):
+        if not hasattr(self, "logging_menu"):
+            return
+        if self.demo_running:
+            self._set_menu_entry_state(self.logging_menu, "Start Demo", "disabled")
+            self._set_menu_entry_state(self.logging_menu, "Stop Demo", "normal")
+        else:
+            self._set_menu_entry_state(self.logging_menu, "Start Demo", "normal")
+            self._set_menu_entry_state(self.logging_menu, "Stop Demo", "disabled")
+
+    def _metric_logging_value(self, metric_key: str):
+        metric = getattr(self.state, metric_key, None)
+        if metric is None:
+            return None
+        return metric.value
+
+    def _update_logging_controls(self):
+        if self.logging_active:
+            file_label = ""
+            if self.log_path:
+                file_label = Path(self.log_path).name
+                if len(file_label) > 18:
+                    file_label = file_label[:15] + "..."
+            self.logging_status_text = f"LOG {file_label}" if file_label else ("LOGGING" if self.log_handle is not None else "LOG ARMED")
+            pill_state = ("#2E7D32", TEXT, self.logging_status_text)
+            self._set_menu_entry_state(self.logging_menu, "Start Logging", "disabled")
+            self._set_menu_entry_state(self.logging_menu, "Stop Logging", "normal")
+            self._set_menu_entry_state(self.logging_menu, "Open Log Folder", "normal")
+        else:
+            self.logging_status_text = "LOG OFF"
+            pill_state = (CARD_BG, MUTED, self.logging_status_text)
+            self._set_menu_entry_state(self.logging_menu, "Start Logging", "normal")
+            self._set_menu_entry_state(self.logging_menu, "Stop Logging", "disabled")
+            self._set_menu_entry_state(self.logging_menu, "Open Log Folder", "normal")
+        if self._logging_pill_cache != pill_state:
+            self.logging_pill.config(bg=pill_state[0], fg=pill_state[1], text=pill_state[2])
+            self._logging_pill_cache = pill_state
+
+    def _open_log_folder(self):
+        log_target = self.log_path or self._resolve_log_path(str(self.settings_model["logging"].get("format", "CSV")).strip().upper() or "CSV")
+        if not log_target:
+            return
+        folder = Path(log_target).expanduser().resolve().parent
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+            os.startfile(str(folder))
+        except Exception:
+            pass
+
+    def _resolve_log_path(self, log_format: str):
+        logging_model = self.settings_model["logging"]
+        raw_path = str(logging_model.get("file_path", "")).strip()
+        default_ext = ".json" if log_format == "JSON" else ".csv"
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+        if raw_path:
+            path_obj = Path(raw_path)
+            if path_obj.suffix:
+                base_dir = path_obj.parent
+                stem = path_obj.stem
+                ext = path_obj.suffix
+            else:
+                base_dir = path_obj
+                stem = "telemetry"
+                ext = default_ext
+        else:
+            base_dir = Path(__file__).resolve().parent / "logs"
+            stem = "telemetry"
+            ext = default_ext
+
+        if log_format == "MOTEC CSV":
+            ext = ".csv"
+
+        if logging_model.get("auto_name", True):
+            return str(base_dir / f"{stem}_{timestamp}{ext}")
+        if raw_path and Path(raw_path).suffix:
+            return str(Path(raw_path))
+        return str(base_dir / f"{stem}{ext}")
+
+    def _start_logging(self):
+        self.settings_model["logging"]["enabled"] = True
+        self.logging_active = True
+        self._last_log_monotonic = 0.0
+        self._last_logged_line_count = -1
+        self._close_log_session()
+        self._update_logging_controls()
+        self._save_persisted_state()
+
+    def _stop_logging(self):
+        self.logging_active = False
+        self._close_log_session()
+        self._update_logging_controls()
+        self._save_persisted_state()
+
+    def _selected_logging_metrics(self):
+        raw_metrics = self.settings_model["logging"].get("metrics", "")
+        aliases = {
+            "rpm": "rpm",
+            "engine speed": "rpm",
+            "engine_speed": "rpm",
+            "tps": "tps",
+            "tps_main": "tps",
+            "aps": "aps",
+            "aps_main": "aps",
+            "lambda": "lambda1",
+            "lambda1": "lambda1",
+            "lambda 1": "lambda1",
+            "coolant": "ect",
+            "coolant temp": "ect",
+            "coolant_temp": "ect",
+            "ect": "ect",
+            "oil temp": "oil_temp",
+            "oil_temp": "oil_temp",
+            "oil pressure": "oil_pressure",
+            "oil_pressure": "oil_pressure",
+            "fuel pressure": "fuel_pressure",
+            "fuel_pressure": "fuel_pressure",
+            "gear": "gear",
+            "wheel speed": "wheel_speed",
+            "wheel_speed": "wheel_speed",
+            "throughput": "throughput",
+            "neutral_park": "neutral_park",
+            "neutral/park": "neutral_park",
+        }
+        selected = []
+        seen = set()
+        for token in str(raw_metrics).split(","):
+            key = aliases.get(token.strip().lower())
+            if key and key not in seen:
+                selected.append(key)
+                seen.add(key)
+        if selected:
+            return selected
+        return [
+            "rpm",
+            "ect",
+            "oil_temp",
+            "oil_pressure",
+            "fuel_pressure",
+            "lambda1",
+            "tps",
+            "aps",
+            "gear",
+            "wheel_speed",
+            "throughput",
+        ]
+
+    def _build_log_snapshot(self):
+        snapshot = {"timestamp": datetime.now().isoformat(timespec="milliseconds")}
+        for metric_name in self._selected_logging_metrics():
+            value = self._metric_logging_value(metric_name)
+            if value is not None:
+                snapshot[metric_name] = value
+        return snapshot
+
+    @staticmethod
+    def _motec_metric_spec(metric_name: str):
+        specs = {
+            "rpm": {"channel": "Engine RPM", "unit": "rpm", "decimals": 0},
+            "ect": {"channel": "Engine Temp", "unit": "C", "decimals": 1},
+            "oil_temp": {"channel": "Eng Oil Temp", "unit": "C", "decimals": 1},
+            "oil_pressure": {"channel": "Eng Oil Pres", "unit": "raw", "decimals": 0},
+            "fuel_pressure": {"channel": "Fuel Pres", "unit": "raw", "decimals": 0},
+            "lambda1": {"channel": "Lambda", "unit": "none", "decimals": 3},
+            "tps": {"channel": "Throttle Pos", "unit": "%", "decimals": 1},
+            "aps": {"channel": "Accel Pedal Pos", "unit": "%", "decimals": 1},
+            "gear": {"channel": "Gear", "unit": "none", "decimals": 0},
+            "wheel_speed": {"channel": "Wheel Speed", "unit": "raw", "decimals": 0},
+            "throughput": {"channel": "Throughput", "unit": "kbps", "decimals": 1},
+            "neutral_park": {"channel": "Neutral Park", "unit": "none", "decimals": 0},
+        }
+        return specs.get(metric_name, {"channel": metric_name, "unit": "none", "decimals": 3})
+
+    def _motec_header_rows(self, columns, sample_rate_hz: float):
+        started = self.log_session_started_wallclock or datetime.now()
+        date_text = started.strftime("%m/%d/%Y")
+        time_text = started.strftime("%I:%M:%S %p").lstrip("0") or "0:00:00 AM"
+        channel_row = ["Time"]
+        units_row = ["s"]
+        for metric_name in columns:
+            spec = self._motec_metric_spec(metric_name)
+            channel_row.append(spec["channel"])
+            units_row.append(spec["unit"])
+        return [
+            ["Driver", "SDM Telemetry", "", "", "Engine ID", "Telemetry"],
+            ["Device", "SDM Telemetry Dashboard"],
+            ["Comment", "Generated by SDM Telemetry", "", "", "Session", "1"],
+            ["Log Date", date_text, "", "", "Origin Time", "0.000", "s"],
+            ["Log Time", time_text, "", "", "Start Time", "0.000", "s"],
+            ["Sample Rate", f"{sample_rate_hz:.3f}".rstrip("0").rstrip("."), "Hz", "", "End Time", "0.000", "s"],
+            ["Duration", "0.000", "s", "", "Start Distance", "0", "m"],
+            ["Range", "entire outing", "", "", "End Distance", "0", "m"],
+            ["Beacon Markers", ""],
+            channel_row,
+            units_row,
+        ]
+
+    def _motec_data_row(self, snapshot, elapsed_seconds: float):
+        row = [f"{elapsed_seconds:.3f}".rstrip("0").rstrip(".") if elapsed_seconds > 0 else "0"]
+        for metric_name in self.log_columns:
+            value = snapshot.get(metric_name)
+            if value is None:
+                row.append("")
+                continue
+            spec = self._motec_metric_spec(metric_name)
+            decimals = spec["decimals"]
+            if decimals <= 0:
+                row.append(str(int(round(float(value)))))
+            else:
+                row.append(f"{float(value):.{decimals}f}")
+        return row
+
+    def _close_log_session(self):
+        if self.log_handle is not None:
             try:
-                low = float(low_raw) if str(low_raw).strip() != "" else None
-            except ValueError:
-                low = None
-            try:
-                high = float(high_raw) if str(high_raw).strip() != "" else None
-            except ValueError:
-                high = None
-            if low is not None and value < low:
-                alerts.append(f"{label} low")
-            if high is not None and value > high:
-                alerts.append(f"{label} high")
-        return alerts
+                self.log_handle.close()
+            except OSError:
+                pass
+        self.log_handle = None
+        self.log_writer = None
+        self.log_path = None
+        self.log_format = None
+        self.log_columns = []
+        self.log_session_started_monotonic = None
+        self.log_session_started_wallclock = None
+        self._last_logged_line_count = -1
+        if hasattr(self, "logging_pill"):
+            self._update_logging_controls()
+
+    def _ensure_log_session(self):
+        logging_model = self.settings_model["logging"]
+        if not self.logging_active:
+            self._close_log_session()
+            self._update_logging_controls()
+            return False
+
+        log_format = str(logging_model.get("format", "CSV")).strip().upper() or "CSV"
+        columns = self._selected_logging_metrics()
+
+        if (
+            self.log_handle is not None
+            and self.log_format == log_format
+            and self.log_columns == columns
+        ):
+            return True
+
+        file_path = self._resolve_log_path(log_format)
+        if not file_path:
+            self._close_log_session()
+            self._update_logging_controls()
+            return False
+        resolved_path = str(Path(file_path))
+
+        if (
+            self.log_handle is not None
+            and self.log_path == resolved_path
+            and self.log_format == log_format
+            and self.log_columns == columns
+        ):
+            return True
+
+        self._close_log_session()
+
+        path_obj = Path(resolved_path)
+        try:
+            path_obj.parent.mkdir(parents=True, exist_ok=True)
+            if log_format == "CSV":
+                append_mode = bool(logging_model.get("append_mode", True))
+                file_exists = path_obj.exists()
+                file_empty = (not file_exists) or path_obj.stat().st_size == 0
+                handle = path_obj.open("a" if append_mode else "w", newline="", encoding="utf-8")
+                writer = csv.DictWriter(handle, fieldnames=["timestamp", *columns], extrasaction="ignore")
+                if file_empty or not append_mode:
+                    writer.writeheader()
+                self.log_handle = handle
+                self.log_writer = writer
+            elif log_format == "MOTEC CSV":
+                interval_raw = str(logging_model.get("interval_ms", "100")).strip()
+                try:
+                    sample_rate_hz = 1000.0 / max(1.0, float(interval_raw))
+                except ValueError:
+                    sample_rate_hz = 10.0
+                handle = path_obj.open("w", newline="", encoding="utf-8")
+                writer = csv.writer(handle, quoting=csv.QUOTE_ALL)
+                self.log_session_started_monotonic = time.monotonic()
+                self.log_session_started_wallclock = datetime.now()
+                for row in self._motec_header_rows(columns, sample_rate_hz):
+                    writer.writerow(row)
+                self.log_handle = handle
+                self.log_writer = writer
+            else:
+                append_mode = bool(logging_model.get("append_mode", True))
+                self.log_handle = path_obj.open("a" if append_mode else "w", encoding="utf-8")
+                self.log_writer = None
+                self.log_session_started_monotonic = time.monotonic()
+                self.log_session_started_wallclock = datetime.now()
+            if self.log_session_started_monotonic is None:
+                self.log_session_started_monotonic = time.monotonic()
+            if self.log_session_started_wallclock is None:
+                self.log_session_started_wallclock = datetime.now()
+            self.log_path = resolved_path
+            self.log_format = log_format
+            self.log_columns = columns
+            self._update_logging_controls()
+            return True
+        except OSError:
+            self._close_log_session()
+            self._update_logging_controls()
+            return False
+
+    def _handle_logging(self):
+        if self.state.last_update_monotonic <= 0.0 and not self.demo_running:
+            return
+        if not self._ensure_log_session():
+            return
+        if self.state.line_count == self._last_logged_line_count:
+            return
+
+        interval_raw = str(self.settings_model["logging"].get("interval_ms", "100")).strip()
+        try:
+            interval_seconds = max(0.02, float(interval_raw) / 1000.0)
+        except ValueError:
+            interval_seconds = 0.1
+
+        now = time.monotonic()
+        if now - self._last_log_monotonic < interval_seconds:
+            return
+
+        snapshot = self._build_log_snapshot()
+        if len(snapshot) <= 1:
+            return
+
+        try:
+            if self.log_format == "CSV" and self.log_writer is not None:
+                self.log_writer.writerow(snapshot)
+            elif self.log_format == "MOTEC CSV" and self.log_writer is not None:
+                start_time = self.log_session_started_monotonic or now
+                self.log_writer.writerow(self._motec_data_row(snapshot, max(0.0, now - start_time)))
+            elif self.log_handle is not None:
+                self.log_handle.write(json.dumps(snapshot) + "\n")
+            if self.log_handle is not None:
+                self.log_handle.flush()
+            self._last_log_monotonic = now
+            self._last_logged_line_count = self.state.line_count
+        except OSError:
+            self._close_log_session()
+
+    def _on_root_close(self):
+        self._save_persisted_state()
+        self._disconnect_serial(save_state=False)
+        self._close_log_session()
+        if self.settings_dialog is not None and self.settings_dialog.winfo_exists():
+            self.settings_dialog.destroy()
+        self.root.destroy()
 
     def _open_settings_dialog(self):
         if self.settings_dialog is not None and self.settings_dialog.winfo_exists():
@@ -1808,64 +3246,147 @@ class DashboardApp:
             return
 
         dialog = tk.Toplevel(self.root)
-        dialog.title("CAN Setup")
+        dialog.title("Settings")
         dialog.configure(bg=BACKGROUND)
         dialog.transient(self.root)
-        dialog.geometry("920x560")
-        dialog.minsize(860, 520)
+        dialog.geometry("1080x700")
+        dialog.minsize(980, 620)
         dialog.protocol("WM_DELETE_WINDOW", dialog.withdraw)
+        dialog.grid_rowconfigure(0, weight=1)
+        dialog.grid_columnconfigure(0, weight=1)
         self.settings_dialog = dialog
+        self._apply_dark_title_bar(dialog)
 
         style = ttk.Style(dialog)
         try:
             style.theme_use("clam")
         except tk.TclError:
             pass
-        style.configure("Pclink.TNotebook", background=BACKGROUND, borderwidth=0)
-        style.configure("Pclink.TNotebook.Tab", padding=(10, 6), font=("Bahnschrift SemiBold", 10))
-        style.configure("Pclink.Treeview", rowheight=22, font=("Consolas", 10))
-        style.configure("Pclink.Treeview.Heading", font=("Bahnschrift SemiBold", 10))
+        dialog.option_add("*Background", CARD_BG)
+        dialog.option_add("*Foreground", TEXT)
+        dialog.option_add("*activeBackground", CARD_BORDER)
+        dialog.option_add("*activeForeground", TEXT)
+        dialog.option_add("*selectBackground", ACCENT_2)
+        dialog.option_add("*selectForeground", TEXT)
+        dialog.option_add("*Entry.Background", BACKGROUND)
+        dialog.option_add("*Entry.Foreground", TEXT)
+        dialog.option_add("*Entry.insertBackground", ACCENT)
+        dialog.option_add("*Entry.highlightThickness", 1)
+        dialog.option_add("*Entry.highlightBackground", CARD_BORDER)
+        dialog.option_add("*Entry.highlightColor", ACCENT_2)
+        dialog.option_add("*Entry.relief", "flat")
+        dialog.option_add("*Entry.borderWidth", 1)
+        dialog.option_add("*Listbox.Background", BACKGROUND)
+        dialog.option_add("*Listbox.Foreground", TEXT)
+        dialog.option_add("*Listbox.selectBackground", ACCENT_2)
+        dialog.option_add("*Listbox.selectForeground", TEXT)
+        dialog.option_add("*Button.Background", CARD_BG)
+        dialog.option_add("*Button.Foreground", TEXT)
+        dialog.option_add("*Checkbutton.Background", CARD_BG)
+        dialog.option_add("*Checkbutton.Foreground", TEXT)
+        dialog.option_add("*Radiobutton.Background", CARD_BG)
+        dialog.option_add("*Radiobutton.Foreground", TEXT)
+        dialog.option_add("*LabelFrame.Background", CARD_BG)
+        dialog.option_add("*LabelFrame.Foreground", ACCENT)
+        dialog.option_add("*LabelFrame.relief", "flat")
+        dialog.option_add("*LabelFrame.borderWidth", 1)
+        dialog.option_add("*LabelFrame.highlightThickness", 1)
+        dialog.option_add("*LabelFrame.highlightBackground", CARD_BORDER)
 
-        wrapper = tk.Frame(dialog, bg="#E7E7E7")
-        wrapper.pack(fill="both", expand=True, padx=10, pady=10)
+        style.configure("Pclink.TNotebook", background=BACKGROUND, borderwidth=0)
+        style.configure("Pclink.TNotebook.Tab", background=CARD_BG, foreground=TEXT, padding=(10, 6), font=("Bahnschrift SemiBold", 10), borderwidth=0)
+        style.map("Pclink.TNotebook.Tab", background=[("selected", ACCENT_2), ("active", CARD_BORDER)], foreground=[("selected", TEXT), ("active", TEXT)])
+        style.configure("Pclink.Treeview", background=BACKGROUND, fieldbackground=BACKGROUND, foreground=TEXT, rowheight=22, font=("Consolas", 10), borderwidth=1, relief="flat", bordercolor=CARD_BORDER, lightcolor=CARD_BORDER, darkcolor=CARD_BORDER)
+        style.map("Pclink.Treeview", background=[("selected", ACCENT_2)], foreground=[("selected", TEXT)])
+        style.configure("Pclink.Treeview.Heading", background=CARD_BG, foreground=ACCENT, font=("Bahnschrift SemiBold", 10), borderwidth=1, relief="flat", bordercolor=CARD_BORDER, lightcolor=CARD_BORDER, darkcolor=CARD_BORDER)
+        style.map("Pclink.Treeview.Heading", background=[("active", CARD_BORDER)])
+        style.configure("Pclink.TCombobox", fieldbackground=BACKGROUND, background=CARD_BG, foreground=TEXT, borderwidth=1, relief="flat", padding=1, arrowcolor=ACCENT, bordercolor=CARD_BORDER, lightcolor=CARD_BORDER, darkcolor=CARD_BORDER)
+        style.map("Pclink.TCombobox", fieldbackground=[("readonly", BACKGROUND)], background=[("readonly", CARD_BG)], foreground=[("readonly", TEXT)])
+
+        wrapper = tk.Frame(dialog, bg=BACKGROUND)
+        wrapper.grid(row=0, column=0, sticky="nsew", padx=10, pady=(10, 0))
 
         notebook = ttk.Notebook(wrapper, style="Pclink.TNotebook")
         notebook.pack(fill="both", expand=True)
 
-        mode_tab = tk.Frame(notebook, bg="#F2F2F2")
-        streams_tab = tk.Frame(notebook, bg="#F2F2F2")
-        critical_tab = tk.Frame(notebook, bg="#F2F2F2")
-        notebook.add(mode_tab, text="Mode")
-        notebook.add(streams_tab, text="Streams")
+        connection_tab = tk.Frame(notebook, bg=CARD_BG)
+        mapping_tab = tk.Frame(notebook, bg=CARD_BG)
+        critical_tab = tk.Frame(notebook, bg=CARD_BG)
+        logging_tab = tk.Frame(notebook, bg=CARD_BG)
+        graphs_tab = tk.Frame(notebook, bg=CARD_BG)
+        demo_tab = tk.Frame(notebook, bg=CARD_BG)
+        advanced_tab = tk.Frame(notebook, bg=CARD_BG)
+        notebook.add(connection_tab, text="Connection")
+        notebook.add(mapping_tab, text="CAN Mapping")
         notebook.add(critical_tab, text="Critical")
+        notebook.add(logging_tab, text="Logging")
+        notebook.add(graphs_tab, text="Graphs")
+        notebook.add(demo_tab, text="Demo")
+        notebook.add(advanced_tab, text="Advanced")
 
+        connection_model = self.settings_model["connection"]
+        logging_model = self.settings_model["logging"]
+        graphs_model = self.settings_model["graphs"]
+        demo_model = self.settings_model["demo"]
+        advanced_model = self.settings_model["advanced"]
+        alert_settings_model = self.settings_model["alerts"]
         mode_model = self.settings_model["mode"]
         streams_model = self.settings_model["streams"]
 
-        mode_data = tk.LabelFrame(mode_tab, text="Data", bg="#F2F2F2", padx=10, pady=8)
-        mode_data.pack(fill="both", expand=True, padx=10, pady=10)
+        connection_box = tk.LabelFrame(connection_tab, text="Serial Connection", bg=CARD_BG, padx=12, pady=10)
+        connection_box.pack(fill="both", expand=True, padx=10, pady=10)
 
-        channel_list = tk.Listbox(mode_data, exportselection=False, width=28, height=12)
+        serial_port_var = tk.StringVar(value=connection_model["serial_port"])
+        baud_rate_var = tk.StringVar(value=connection_model["baud_rate"])
+        auto_connect_var = tk.BooleanVar(value=connection_model["auto_connect"])
+        reconnect_var = tk.BooleanVar(value=connection_model["reconnect"])
+        launch_demo_var = tk.BooleanVar(value=connection_model["launch_demo"])
+
+        tk.Label(connection_box, text="Serial Port", bg=CARD_BG, fg=TEXT).grid(row=0, column=0, sticky="w", padx=(0, 10), pady=(0, 10))
+        tk.Entry(connection_box, textvariable=serial_port_var, width=16).grid(row=0, column=1, sticky="w", pady=(0, 10))
+        tk.Label(connection_box, text="Baud Rate", bg=CARD_BG, fg=TEXT).grid(row=0, column=2, sticky="w", padx=(30, 10), pady=(0, 10))
+        tk.Entry(connection_box, textvariable=baud_rate_var, width=16).grid(row=0, column=3, sticky="w", pady=(0, 10))
+
+        tk.Checkbutton(connection_box, text="Auto Connect On Launch", variable=auto_connect_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND, anchor="w").grid(row=1, column=0, columnspan=2, sticky="w", pady=4)
+        tk.Checkbutton(connection_box, text="Reconnect Automatically", variable=reconnect_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND, anchor="w").grid(row=2, column=0, columnspan=2, sticky="w", pady=4)
+        tk.Checkbutton(connection_box, text="Launch In Demo Mode", variable=launch_demo_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND, anchor="w").grid(row=3, column=0, columnspan=2, sticky="w", pady=4)
+
+        tk.Label(
+            connection_box,
+            text="These settings define how the dashboard connects. They do not reconfigure the live decoder.",
+            bg=CARD_BG,
+            fg=MUTED,
+            font=("Bahnschrift", 10),
+            justify="left",
+        ).grid(row=4, column=0, columnspan=4, sticky="w", pady=(16, 0))
+
+        mapping_wrap = tk.Frame(mapping_tab, bg=CARD_BG)
+        mapping_wrap.pack(fill="both", expand=True, padx=10, pady=10)
+
+        mode_data = tk.LabelFrame(mapping_wrap, text="Channels", bg=CARD_BG, padx=10, pady=8)
+        mode_data.pack(fill="x", expand=False, pady=(0, 10))
+
+        channel_list = tk.Listbox(mode_data, exportselection=False, width=28, height=12, bg=BACKGROUND, fg=TEXT, selectbackground=ACCENT_2, selectforeground=TEXT, highlightthickness=1, highlightbackground=CARD_BORDER)
         channel_list.grid(row=0, column=0, rowspan=5, sticky="nsw", padx=(0, 14))
 
         for item in mode_model["channels"]:
             channel_list.insert("end", item["name"])
 
-        tk.Label(mode_data, text="Mode", bg="#F2F2F2").grid(row=0, column=1, sticky="w")
+        tk.Label(mode_data, text="Mode", bg=CARD_BG, fg=TEXT).grid(row=0, column=1, sticky="w")
         channel_mode_var = tk.StringVar()
-        channel_mode_combo = ttk.Combobox(mode_data, values=["OFF", "Link Razor PDM", "Transmit User Stream 2", "Receive User Stream 3", "Receive User Stream 4"], textvariable=channel_mode_var, width=22)
+        channel_mode_combo = ttk.Combobox(mode_data, style="Pclink.TCombobox", values=["OFF", "Link Razor PDM", "Transmit User Stream 2", "Receive User Stream 3", "Receive User Stream 4"], textvariable=channel_mode_var, width=22)
         channel_mode_combo.grid(row=0, column=2, sticky="w", padx=(8, 24))
 
-        tk.Label(mode_data, text="CAN ID", bg="#F2F2F2").grid(row=0, column=3, sticky="w")
+        tk.Label(mode_data, text="CAN ID", bg=CARD_BG, fg=TEXT).grid(row=0, column=3, sticky="w")
         channel_id_entry = tk.Entry(mode_data, width=12)
         channel_id_entry.grid(row=0, column=4, sticky="w", padx=(8, 24))
 
-        tk.Label(mode_data, text="Format", bg="#F2F2F2").grid(row=1, column=1, sticky="w", pady=(12, 0))
+        tk.Label(mode_data, text="Format", bg=CARD_BG, fg=TEXT).grid(row=1, column=1, sticky="w", pady=(12, 0))
         channel_format_var = tk.StringVar()
-        format_box = tk.Frame(mode_data, bg="#F2F2F2")
+        format_box = tk.Frame(mode_data, bg=CARD_BG)
         format_box.grid(row=1, column=2, columnspan=3, sticky="w", padx=(8, 0), pady=(12, 0))
-        tk.Radiobutton(format_box, text="Normal", value="Normal", variable=channel_format_var, bg="#F2F2F2").pack(anchor="w")
-        tk.Radiobutton(format_box, text="Extended", value="Extended", variable=channel_format_var, bg="#F2F2F2").pack(anchor="w")
+        tk.Radiobutton(format_box, text="Normal", value="Normal", variable=channel_format_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).pack(anchor="w")
+        tk.Radiobutton(format_box, text="Extended", value="Extended", variable=channel_format_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).pack(anchor="w")
 
         selected_channel_index = {"value": 0}
 
@@ -1920,16 +3441,16 @@ class DashboardApp:
         channel_list.selection_set(0)
         load_channel(0)
 
-        mode_actions = tk.Frame(mode_data, bg="#F2F2F2")
+        mode_actions = tk.Frame(mode_data, bg=CARD_BG)
         mode_actions.grid(row=2, column=1, columnspan=4, sticky="w", pady=(18, 0))
         for text, command in (("Save Channel", save_channel), ("Add Channel", add_channel), ("Delete Channel", delete_channel)):
-            tk.Button(mode_actions, text=text, command=command, bg="#E9E9E9", relief="raised", padx=10, pady=4).pack(side="left", padx=(0, 8))
+            tk.Button(mode_actions, text=text, command=command, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
 
         mode_data.columnconfigure(2, weight=1)
         mode_data.columnconfigure(4, weight=1)
 
-        streams_left = tk.Frame(streams_tab, bg="#F2F2F2")
-        streams_left.pack(fill="both", expand=True, padx=10, pady=10)
+        streams_left = tk.Frame(mapping_wrap, bg=CARD_BG)
+        streams_left.pack(fill="both", expand=True)
 
         stream_tree = ttk.Treeview(streams_left, style="Pclink.Treeview", show="tree", selectmode="browse", height=18)
         stream_tree.grid(row=0, column=0, rowspan=4, sticky="nsw", padx=(0, 12))
@@ -1943,16 +3464,16 @@ class DashboardApp:
 
         refresh_stream_tree()
 
-        frame_meta_box = tk.LabelFrame(streams_left, text="Frame", bg="#F2F2F2", padx=10, pady=8)
+        frame_meta_box = tk.LabelFrame(streams_left, text="Frame", bg=CARD_BG, padx=10, pady=8)
         frame_meta_box.grid(row=0, column=1, sticky="new")
         frame_size_var = tk.StringVar()
         id_position_var = tk.StringVar()
         id_decimal_var = tk.StringVar()
         for idx, (label, var) in enumerate((("Frame Size", frame_size_var), ("ID Position", id_position_var), ("ID (decimal)", id_decimal_var))):
-            tk.Label(frame_meta_box, text=label, bg="#F2F2F2").grid(row=0, column=idx * 2, sticky="w")
+            tk.Label(frame_meta_box, text=label, bg=CARD_BG, fg=TEXT).grid(row=0, column=idx * 2, sticky="w")
             tk.Entry(frame_meta_box, textvariable=var, width=8).grid(row=0, column=idx * 2 + 1, sticky="w", padx=(6, 14))
 
-        stream_actions = tk.Frame(streams_left, bg="#F2F2F2")
+        stream_actions = tk.Frame(streams_left, bg=CARD_BG)
         stream_actions.grid(row=1, column=1, sticky="w", pady=(8, 8))
 
         param_tree = ttk.Treeview(
@@ -1969,14 +3490,14 @@ class DashboardApp:
             param_tree.column(column, width=90 if column == "name" else 70, anchor="w")
         param_tree.column("name", width=160)
 
-        param_editor = tk.LabelFrame(streams_left, text="Parameters", bg="#F2F2F2", padx=10, pady=8)
+        param_editor = tk.LabelFrame(streams_left, text="Parameters", bg=CARD_BG, padx=10, pady=8)
         param_editor.grid(row=3, column=1, sticky="ew", pady=(10, 0))
         param_vars = {key: tk.StringVar() for key in ("name", "start", "width", "byte_order", "type", "multiply", "divider", "offset")}
         editor_fields = [("name", "Parameter"), ("start", "Start"), ("width", "Width"), ("byte_order", "Byte Order"), ("type", "Type"), ("multiply", "Multiply"), ("divider", "Divider"), ("offset", "Offset")]
         for idx, (key, label) in enumerate(editor_fields):
             row = idx // 4
             col = (idx % 4) * 2
-            tk.Label(param_editor, text=label, bg="#F2F2F2").grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
+            tk.Label(param_editor, text=label, bg=CARD_BG, fg=TEXT).grid(row=row, column=col, sticky="w", padx=(0, 6), pady=4)
             tk.Entry(param_editor, textvariable=param_vars[key], width=14).grid(row=row, column=col + 1, sticky="w", padx=(0, 14), pady=4)
 
         selected_frame = {"stream": "Stream 1", "frame": "Frame 1"}
@@ -2078,12 +3599,12 @@ class DashboardApp:
             load_param(None)
 
         for text, command in (("Add Frame", add_frame), ("Delete Frame", delete_frame), ("Save Frame", save_frame)):
-            tk.Button(stream_actions, text=text, command=command, bg="#E9E9E9", relief="raised", padx=10, pady=4).pack(side="left", padx=(0, 8))
+            tk.Button(stream_actions, text=text, command=command, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
 
-        param_actions = tk.Frame(param_editor, bg="#F2F2F2")
+        param_actions = tk.Frame(param_editor, bg=CARD_BG)
         param_actions.grid(row=2, column=0, columnspan=8, sticky="w", pady=(10, 0))
         for text, command in (("Add Param", add_param), ("Save Param", save_param), ("Delete Param", delete_param)):
-            tk.Button(param_actions, text=text, command=command, bg="#E9E9E9", relief="raised", padx=10, pady=4).pack(side="left", padx=(0, 8))
+            tk.Button(param_actions, text=text, command=command, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
 
         stream_tree.bind("<<TreeviewSelect>>", on_tree_select)
         param_tree.bind("<<TreeviewSelect>>", on_param_select)
@@ -2096,13 +3617,13 @@ class DashboardApp:
         streams_left.columnconfigure(1, weight=1)
         streams_left.rowconfigure(2, weight=1)
 
-        critical_wrap = tk.Frame(critical_tab, bg="#F2F2F2")
+        critical_wrap = tk.Frame(critical_tab, bg=CARD_BG)
         critical_wrap.pack(fill="both", expand=True, padx=10, pady=10)
 
         critical_box = tk.LabelFrame(
             critical_wrap,
             text="Critical Limits",
-            bg="#F2F2F2",
+            bg=CARD_BG,
             padx=12,
             pady=10,
         )
@@ -2110,41 +3631,342 @@ class DashboardApp:
 
         tk.Label(
             critical_box,
-            text="Set low/high alarm thresholds for each metric. Leave a field blank to disable that threshold.",
-            bg="#F2F2F2",
-            fg="#333333",
+            text="Set warning and critical thresholds. Leave a field blank to disable that threshold.",
+            bg=CARD_BG,
+            fg=MUTED,
             font=("Bahnschrift", 10),
-        ).grid(row=0, column=0, columnspan=3, sticky="w", pady=(0, 10))
-        tk.Label(critical_box, text="Metric", bg="#F2F2F2", font=("Bahnschrift SemiBold", 10)).grid(row=1, column=0, sticky="w", padx=(0, 10))
-        tk.Label(critical_box, text="Low", bg="#F2F2F2", font=("Bahnschrift SemiBold", 10)).grid(row=1, column=1, sticky="w", padx=(0, 10))
-        tk.Label(critical_box, text="High", bg="#F2F2F2", font=("Bahnschrift SemiBold", 10)).grid(row=1, column=2, sticky="w")
+        ).grid(row=0, column=0, columnspan=5, sticky="w", pady=(0, 10))
+
+        alert_settings_model = self.settings_model["alerts"]
+        alert_latching_var = tk.BooleanVar(value=alert_settings_model.get("latching", False))
+        tk.Checkbutton(
+            critical_box,
+            text="Latch alerts until acknowledged",
+            variable=alert_latching_var,
+            bg=CARD_BG,
+            fg=TEXT,
+            selectcolor=BACKGROUND,
+        ).grid(row=1, column=0, columnspan=5, sticky="w", pady=(0, 10))
+
+        tk.Label(critical_box, text="Metric", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift SemiBold", 10)).grid(row=2, column=0, sticky="w", padx=(0, 10))
+        tk.Label(critical_box, text="Warn Low", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift SemiBold", 10)).grid(row=2, column=1, sticky="w", padx=(0, 10))
+        tk.Label(critical_box, text="Warn High", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift SemiBold", 10)).grid(row=2, column=2, sticky="w", padx=(0, 10))
+        tk.Label(critical_box, text="Crit Low", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift SemiBold", 10)).grid(row=2, column=3, sticky="w", padx=(0, 10))
+        tk.Label(critical_box, text="Crit High", bg=CARD_BG, fg=ACCENT, font=("Bahnschrift SemiBold", 10)).grid(row=2, column=4, sticky="w")
 
         self.critical_limit_vars = {}
-        for row_index, (metric_key, config) in enumerate(self.critical_limits.items(), start=2):
-            low_var = tk.StringVar(value=str(config.get("low", "")))
-            high_var = tk.StringVar(value=str(config.get("high", "")))
-            self.critical_limit_vars[metric_key] = {"low": low_var, "high": high_var}
+        for row_index, (metric_key, config) in enumerate(self.critical_limits.items(), start=3):
+            warn_low_var = tk.StringVar(value=str(config.get("warn_low", "")))
+            warn_high_var = tk.StringVar(value=str(config.get("warn_high", "")))
+            crit_low_var = tk.StringVar(value=str(config.get("crit_low", "")))
+            crit_high_var = tk.StringVar(value=str(config.get("crit_high", "")))
+            self.critical_limit_vars[metric_key] = {
+                "warn_low": warn_low_var,
+                "warn_high": warn_high_var,
+                "crit_low": crit_low_var,
+                "crit_high": crit_high_var,
+            }
 
             tk.Label(
                 critical_box,
                 text=config["label"],
-                bg="#F2F2F2",
-                fg="#222222",
+                bg=CARD_BG,
+                fg=TEXT,
                 font=("Bahnschrift", 10),
             ).grid(row=row_index, column=0, sticky="w", pady=4, padx=(0, 10))
-            tk.Entry(critical_box, textvariable=low_var, width=12).grid(row=row_index, column=1, sticky="w", pady=4, padx=(0, 10))
-            tk.Entry(critical_box, textvariable=high_var, width=12).grid(row=row_index, column=2, sticky="w", pady=4)
+            tk.Entry(critical_box, textvariable=warn_low_var, width=10).grid(row=row_index, column=1, sticky="w", pady=4, padx=(0, 10))
+            tk.Entry(critical_box, textvariable=warn_high_var, width=10).grid(row=row_index, column=2, sticky="w", pady=4, padx=(0, 10))
+            tk.Entry(critical_box, textvariable=crit_low_var, width=10).grid(row=row_index, column=3, sticky="w", pady=4, padx=(0, 10))
+            tk.Entry(critical_box, textvariable=crit_high_var, width=10).grid(row=row_index, column=4, sticky="w", pady=4)
 
-            low_var.trace_add("write", lambda *_args: self._sync_critical_limits_from_vars())
-            high_var.trace_add("write", lambda *_args: self._sync_critical_limits_from_vars())
+            warn_low_var.trace_add("write", lambda *_args: self._sync_critical_limits_from_vars())
+            warn_high_var.trace_add("write", lambda *_args: self._sync_critical_limits_from_vars())
+            crit_low_var.trace_add("write", lambda *_args: self._sync_critical_limits_from_vars())
+            crit_high_var.trace_add("write", lambda *_args: self._sync_critical_limits_from_vars())
 
         critical_box.columnconfigure(0, weight=1)
 
-        footer = tk.Frame(wrapper, bg="#E7E7E7")
-        footer.pack(fill="x", pady=(8, 0))
-        tk.Button(footer, text="Apply", bg="#E9E9E9", relief="raised", padx=10, pady=4).pack(side="right", padx=(0, 8))
-        tk.Button(footer, text="OK", command=dialog.withdraw, bg="#E9E9E9", relief="raised", padx=10, pady=4).pack(side="right", padx=(0, 8))
-        tk.Button(footer, text="Cancel", command=dialog.withdraw, bg="#E9E9E9", relief="raised", padx=10, pady=4).pack(side="right", padx=(0, 8))
+        logging_box = tk.LabelFrame(logging_tab, text="Logging", bg=CARD_BG, padx=12, pady=10)
+        logging_box.pack(fill="both", expand=True, padx=10, pady=10)
+        logging_enabled_var = tk.BooleanVar(value=logging_model["enabled"])
+        logging_auto_start_var = tk.BooleanVar(value=logging_model["auto_start"])
+        logging_append_var = tk.BooleanVar(value=logging_model.get("append_mode", True))
+        logging_auto_name_var = tk.BooleanVar(value=logging_model.get("auto_name", True))
+        logging_file_var = tk.StringVar(value=logging_model["file_path"])
+        logging_format_var = tk.StringVar(value=logging_model["format"])
+        logging_metrics_var = tk.StringVar(value=logging_model["metrics"])
+        logging_interval_var = tk.StringVar(value=logging_model["interval_ms"])
+
+        def browse_log_file():
+            selected_format = logging_format_var.get().upper()
+            if selected_format == "JSON":
+                default_name = "telemetry_log.json"
+                default_ext = ".json"
+            elif selected_format == "MOTEC CSV":
+                default_name = "telemetry_motec.csv"
+                default_ext = ".csv"
+            else:
+                default_name = "telemetry_log.csv"
+                default_ext = ".csv"
+            selected_path = filedialog.asksaveasfilename(
+                parent=dialog,
+                title="Select Log File",
+                initialfile=default_name,
+                defaultextension=default_ext,
+                filetypes=[
+                    ("CSV files", "*.csv"),
+                    ("MoTeC CSV files", "*.csv"),
+                    ("JSON files", "*.json"),
+                    ("All files", "*.*"),
+                ],
+            )
+            if selected_path:
+                logging_file_var.set(selected_path)
+
+        def metric_labels_from_value(raw_value: str):
+            selected = []
+            for token in str(raw_value).split(","):
+                key = token.strip()
+                if key in GRAPH_METRIC_OPTIONS:
+                    selected.append(GRAPH_METRIC_OPTIONS[key]["label"])
+            return selected
+
+        def logging_metric_summary():
+            selected = metric_labels_from_value(logging_metrics_var.get())
+            if not selected:
+                return "No metrics selected"
+            if len(selected) <= 3:
+                return ", ".join(selected)
+            return ", ".join(selected[:3]) + f" +{len(selected) - 3}"
+
+        metrics_summary_var = tk.StringVar(value=logging_metric_summary())
+
+        def open_logging_metric_picker():
+            picker = tk.Toplevel(dialog)
+            picker.title("Logging Metrics")
+            picker.configure(bg=BACKGROUND)
+            picker.transient(dialog)
+            picker.grab_set()
+            picker.resizable(False, False)
+            self._apply_dark_title_bar(picker)
+
+            tk.Label(
+                picker,
+                text="Select metrics to include in log files",
+                bg=BACKGROUND,
+                fg=TEXT,
+                font=("Bahnschrift SemiBold", 12),
+            ).pack(anchor="w", padx=14, pady=(14, 10))
+
+            rows = tk.Frame(picker, bg=BACKGROUND)
+            rows.pack(fill="both", expand=True, padx=14, pady=(0, 8))
+            selected_keys = {key.strip() for key in str(logging_metrics_var.get()).split(",") if key.strip()}
+            metric_vars = {}
+            for metric_key, meta in GRAPH_METRIC_OPTIONS.items():
+                var = tk.BooleanVar(value=metric_key in selected_keys)
+                metric_vars[metric_key] = var
+                tk.Checkbutton(
+                    rows,
+                    text=meta["label"],
+                    variable=var,
+                    bg=BACKGROUND,
+                    fg=TEXT,
+                    activebackground=BACKGROUND,
+                    activeforeground=TEXT,
+                    selectcolor=CARD_BG,
+                    anchor="w",
+                    font=("Bahnschrift", 10),
+                ).pack(anchor="w", pady=2)
+
+            button_row = tk.Frame(picker, bg=BACKGROUND)
+            button_row.pack(fill="x", padx=14, pady=(0, 14))
+
+            def apply_selection():
+                chosen = [metric_key for metric_key, var in metric_vars.items() if var.get()]
+                logging_metrics_var.set(",".join(chosen))
+                selected = metric_labels_from_value(logging_metrics_var.get())
+                if not selected:
+                    metrics_summary_var.set("No metrics selected")
+                elif len(selected) <= 3:
+                    metrics_summary_var.set(", ".join(selected))
+                else:
+                    metrics_summary_var.set(", ".join(selected[:3]) + f" +{len(selected) - 3}")
+                picker.destroy()
+
+            tk.Button(button_row, text="Cancel", command=picker.destroy, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="right")
+            tk.Button(button_row, text="Apply", command=apply_selection, bg=ACCENT_2, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="right", padx=(0, 8))
+
+        tk.Checkbutton(logging_box, text="Enable Logging", variable=logging_enabled_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).grid(row=0, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        tk.Checkbutton(logging_box, text="Auto Start Logging", variable=logging_auto_start_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).grid(row=1, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        tk.Checkbutton(logging_box, text="Append To Existing File", variable=logging_append_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).grid(row=2, column=0, columnspan=2, sticky="w", pady=(0, 8))
+        tk.Checkbutton(logging_box, text="Auto-name File By Date/Time", variable=logging_auto_name_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).grid(row=3, column=0, columnspan=2, sticky="w", pady=(0, 12))
+        tk.Label(logging_box, text="Log File Path", bg=CARD_BG, fg=TEXT).grid(row=4, column=0, sticky="w", padx=(0, 10), pady=4)
+        file_path_row = tk.Frame(logging_box, bg=CARD_BG)
+        file_path_row.grid(row=4, column=1, sticky="ew", pady=4)
+        tk.Entry(file_path_row, textvariable=logging_file_var, width=48).pack(side="left", fill="x", expand=True)
+        tk.Button(file_path_row, text="Browse", command=browse_log_file, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=2).pack(side="left", padx=(8, 0))
+        tk.Label(logging_box, text="Format", bg=CARD_BG, fg=TEXT).grid(row=5, column=0, sticky="w", padx=(0, 10), pady=4)
+        ttk.Combobox(logging_box, style="Pclink.TCombobox", values=["CSV", "JSON", "MoTeC CSV"], textvariable=logging_format_var, width=18, state="readonly").grid(row=5, column=1, sticky="w", pady=4)
+        tk.Label(logging_box, text="Metrics To Log", bg=CARD_BG, fg=TEXT).grid(row=6, column=0, sticky="w", padx=(0, 10), pady=4)
+        metrics_row = tk.Frame(logging_box, bg=CARD_BG)
+        metrics_row.grid(row=6, column=1, sticky="ew", pady=4)
+        tk.Label(metrics_row, textvariable=metrics_summary_var, bg=BACKGROUND, fg=TEXT, anchor="w", relief="flat", highlightthickness=1, highlightbackground=CARD_BORDER, padx=10, pady=5).pack(side="left", fill="x", expand=True)
+        tk.Button(metrics_row, text="Choose", command=open_logging_metric_picker, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=2).pack(side="left", padx=(8, 0))
+        tk.Label(logging_box, text="Log Interval (ms)", bg=CARD_BG, fg=TEXT).grid(row=7, column=0, sticky="w", padx=(0, 10), pady=4)
+        tk.Entry(logging_box, textvariable=logging_interval_var, width=18).grid(row=7, column=1, sticky="w", pady=4)
+        logging_box.columnconfigure(1, weight=1)
+
+        graphs_box = tk.LabelFrame(graphs_tab, text="Graphs", bg=CARD_BG, padx=12, pady=10)
+        graphs_box.pack(fill="both", expand=True, padx=10, pady=10)
+        history_length_var = tk.StringVar(value=graphs_model["history_length"])
+        custom_graph_max_var = tk.StringVar(value=graphs_model["custom_graph_max_metrics"])
+        time_window_var = tk.StringVar(value=graphs_model["time_window_s"])
+        auto_scale_var = tk.BooleanVar(value=graphs_model["auto_scale"])
+        show_grid_var = tk.BooleanVar(value=graphs_model["show_grid"])
+        show_axis_labels_var = tk.BooleanVar(value=graphs_model["show_axis_labels"])
+
+        tk.Label(graphs_box, text="Default History Length", bg=CARD_BG, fg=TEXT).grid(row=0, column=0, sticky="w", padx=(0, 10), pady=4)
+        tk.Entry(graphs_box, textvariable=history_length_var, width=14).grid(row=0, column=1, sticky="w", pady=4)
+        tk.Label(graphs_box, text="Default Time Window (s)", bg=CARD_BG, fg=TEXT).grid(row=1, column=0, sticky="w", padx=(0, 10), pady=4)
+        tk.Entry(graphs_box, textvariable=time_window_var, width=14).grid(row=1, column=1, sticky="w", pady=4)
+        tk.Label(graphs_box, text="Custom Graph Max Metrics", bg=CARD_BG, fg=TEXT).grid(row=2, column=0, sticky="w", padx=(0, 10), pady=4)
+        tk.Entry(graphs_box, textvariable=custom_graph_max_var, width=14).grid(row=2, column=1, sticky="w", pady=4)
+        tk.Checkbutton(graphs_box, text="Enable Auto Scale", variable=auto_scale_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).grid(row=3, column=0, columnspan=2, sticky="w", pady=(12, 4))
+        tk.Checkbutton(graphs_box, text="Show Grid", variable=show_grid_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).grid(row=4, column=0, columnspan=2, sticky="w", pady=4)
+        tk.Checkbutton(graphs_box, text="Show Axis Labels", variable=show_axis_labels_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).grid(row=5, column=0, columnspan=2, sticky="w", pady=4)
+
+        demo_box = tk.LabelFrame(demo_tab, text="Demo", bg=CARD_BG, padx=12, pady=10)
+        demo_box.pack(fill="both", expand=True, padx=10, pady=10)
+        demo_speed_var = tk.StringVar(value=demo_model["speed"])
+        demo_rpm_min_var = tk.StringVar(value=demo_model["rpm_min"])
+        demo_rpm_max_var = tk.StringVar(value=demo_model["rpm_max"])
+        demo_temp_min_var = tk.StringVar(value=demo_model["temp_min"])
+        demo_temp_max_var = tk.StringVar(value=demo_model["temp_max"])
+        demo_pressure_min_var = tk.StringVar(value=demo_model["pressure_min"])
+        demo_pressure_max_var = tk.StringVar(value=demo_model["pressure_max"])
+
+        demo_fields = [
+            ("Demo Speed", demo_speed_var),
+            ("RPM Min", demo_rpm_min_var),
+            ("RPM Max", demo_rpm_max_var),
+            ("Temp Min", demo_temp_min_var),
+            ("Temp Max", demo_temp_max_var),
+            ("Pressure Min", demo_pressure_min_var),
+            ("Pressure Max", demo_pressure_max_var),
+        ]
+        for idx, (label, var) in enumerate(demo_fields):
+            row = idx // 2
+            col = (idx % 2) * 2
+            tk.Label(demo_box, text=label, bg=CARD_BG, fg=TEXT).grid(row=row, column=col, sticky="w", padx=(0, 10), pady=6)
+            tk.Entry(demo_box, textvariable=var, width=14).grid(row=row, column=col + 1, sticky="w", padx=(0, 24), pady=6)
+
+        advanced_box = tk.LabelFrame(advanced_tab, text="Advanced", bg=CARD_BG, padx=12, pady=10)
+        advanced_box.pack(fill="both", expand=True, padx=10, pady=10)
+        developer_mode_var = tk.BooleanVar(value=advanced_model["developer_mode"])
+        raw_frame_debug_var = tk.BooleanVar(value=advanced_model["raw_frame_debug"])
+        tk.Checkbutton(advanced_box, text="Developer Mode", variable=developer_mode_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).pack(anchor="w", pady=(0, 8))
+        tk.Checkbutton(advanced_box, text="Raw Frame Debug", variable=raw_frame_debug_var, bg=CARD_BG, fg=TEXT, selectcolor=BACKGROUND).pack(anchor="w", pady=(0, 8))
+        workspace_box = tk.LabelFrame(advanced_box, text="Workspace", bg=CARD_BG, padx=10, pady=8)
+        workspace_box.pack(fill="x", pady=(10, 8))
+        workspace_actions = tk.Frame(workspace_box, bg=CARD_BG)
+        workspace_actions.pack(anchor="w")
+        tk.Button(workspace_actions, text="Import Workspace", command=self._import_workspace, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Button(workspace_actions, text="Export Workspace", command=self._export_workspace, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Label(workspace_box, text="Imports/exports settings, tabs, layouts, thresholds, and custom graph state.", bg=CARD_BG, fg=MUTED, font=("Bahnschrift", 10)).pack(anchor="w", pady=(8, 0))
+
+        profile_box = tk.LabelFrame(advanced_box, text="Profiles", bg=CARD_BG, padx=10, pady=8)
+        profile_box.pack(fill="x", pady=(10, 8))
+        profile_actions = tk.Frame(profile_box, bg=CARD_BG)
+        profile_actions.pack(anchor="w")
+        tk.Button(profile_actions, text="Open Profile Manager", command=self._open_profile_manager, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Button(profile_actions, text="Save Current As Profile", command=self._save_profile_as, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Label(profile_box, text="Current profile: " + self.current_profile_name, bg=CARD_BG, fg=MUTED, font=("Bahnschrift", 10)).pack(anchor="w", pady=(8, 0))
+
+        session_box = tk.LabelFrame(advanced_box, text="Session Tools", bg=CARD_BG, padx=10, pady=8)
+        session_box.pack(fill="x", pady=(10, 8))
+        session_actions_top = tk.Frame(session_box, bg=CARD_BG)
+        session_actions_top.pack(anchor="w")
+        tk.Button(session_actions_top, text="Duplicate Current Tab", command=self._duplicate_current_tab, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Button(session_actions_top, text="Reset LIVE Tab", command=lambda: self._reset_named_tab("LIVE"), bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Button(session_actions_top, text="Reset LOGGING Tab", command=lambda: self._reset_named_tab("LOGGING"), bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        session_actions_bottom = tk.Frame(session_box, bg=CARD_BG)
+        session_actions_bottom.pack(anchor="w", pady=(8, 0))
+        tk.Button(session_actions_bottom, text="Reset All Tabs", command=self._reset_all_tabs, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Button(session_actions_bottom, text="Clear Latched Alerts", command=self._acknowledge_alerts, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="left", padx=(0, 8))
+        tk.Label(
+            advanced_box,
+            text="These settings are GUI-side only right now. Decoder behavior does not change unless wired in later.",
+            bg=CARD_BG,
+            fg=MUTED,
+            font=("Bahnschrift", 10),
+            justify="left",
+        ).pack(anchor="w", pady=(12, 0))
+
+        def save_connection():
+            connection_model["serial_port"] = serial_port_var.get()
+            connection_model["baud_rate"] = baud_rate_var.get()
+            connection_model["auto_connect"] = bool(auto_connect_var.get())
+            connection_model["reconnect"] = bool(reconnect_var.get())
+            connection_model["launch_demo"] = bool(launch_demo_var.get())
+
+        def save_logging():
+            was_active = self.logging_active
+            logging_model["enabled"] = bool(logging_enabled_var.get())
+            logging_model["auto_start"] = bool(logging_auto_start_var.get())
+            logging_model["append_mode"] = bool(logging_append_var.get())
+            logging_model["auto_name"] = bool(logging_auto_name_var.get())
+            logging_model["file_path"] = logging_file_var.get()
+            logging_model["format"] = logging_format_var.get()
+            logging_model["metrics"] = logging_metrics_var.get()
+            logging_model["interval_ms"] = logging_interval_var.get()
+            self._last_log_monotonic = 0.0
+            self._close_log_session()
+            if not logging_model["enabled"]:
+                self.logging_active = False
+            elif was_active:
+                self.logging_active = True
+            else:
+                self.logging_active = bool(logging_model["auto_start"])
+            self._update_logging_controls()
+
+        def save_graphs():
+            graphs_model["history_length"] = history_length_var.get()
+            graphs_model["custom_graph_max_metrics"] = custom_graph_max_var.get()
+            graphs_model["time_window_s"] = time_window_var.get()
+            graphs_model["auto_scale"] = bool(auto_scale_var.get())
+            graphs_model["show_grid"] = bool(show_grid_var.get())
+            graphs_model["show_axis_labels"] = bool(show_axis_labels_var.get())
+
+        def save_demo():
+            demo_model["speed"] = demo_speed_var.get()
+            demo_model["rpm_min"] = demo_rpm_min_var.get()
+            demo_model["rpm_max"] = demo_rpm_max_var.get()
+            demo_model["temp_min"] = demo_temp_min_var.get()
+            demo_model["temp_max"] = demo_temp_max_var.get()
+            demo_model["pressure_min"] = demo_pressure_min_var.get()
+            demo_model["pressure_max"] = demo_pressure_max_var.get()
+
+        def save_advanced():
+            advanced_model["developer_mode"] = bool(developer_mode_var.get())
+            advanced_model["raw_frame_debug"] = bool(raw_frame_debug_var.get())
+            alert_settings_model["latching"] = bool(alert_latching_var.get())
+
+        def save_all_settings():
+            save_connection()
+            save_channel()
+            save_frame()
+            save_logging()
+            save_graphs()
+            save_demo()
+            save_advanced()
+            self._sync_critical_limits_from_vars()
+            self._save_persisted_state()
+
+        footer = tk.Frame(dialog, bg=BACKGROUND)
+        footer.grid(row=1, column=0, sticky="ew", padx=10, pady=(8, 10))
+        tk.Button(footer, text="Apply", command=save_all_settings, bg=CARD_BORDER, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="right", padx=(0, 8))
+        tk.Button(footer, text="OK", command=lambda: (save_all_settings(), dialog.withdraw()), bg=ACCENT_2, fg=TEXT, activebackground=ACCENT_2, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="right", padx=(0, 8))
+        tk.Button(footer, text="Cancel", command=dialog.withdraw, bg=CARD_BORDER, fg=TEXT, activebackground=CARD_BORDER, activeforeground=TEXT, relief="flat", padx=10, pady=4).pack(side="right", padx=(0, 8))
 
     def _handle_secret_keypress(self, event):
         char = (event.char or "").lower()
@@ -2170,10 +3992,10 @@ class DashboardApp:
             self._easter_egg_after_id = None
             return
 
-        pulse = 0.5 + 0.5 * math.sin(elapsed * 7.5)
-        jitter_x = math.sin(elapsed * 36.0) * 6.0
-        jitter_y = math.cos(elapsed * 28.0) * 4.0
-        font_size = int(64 + 18 * pulse)
+        pulse = 0.5 + 0.5 * math.sin(elapsed * 5.2)
+        jitter_x = math.sin(elapsed * 18.0) * 3.0
+        jitter_y = math.cos(elapsed * 14.0) * 2.0
+        font_size = int(68 + 14 * pulse)
         flash_on = int(elapsed * 8.0) % 2 == 0
         color = DANGER if flash_on else ACCENT
 
@@ -2182,7 +4004,7 @@ class DashboardApp:
             font=("Bahnschrift Bold", font_size),
         )
         self.easter_egg_label.place(relx=0.5, rely=0.5, anchor="center", x=int(jitter_x), y=int(jitter_y))
-        self._easter_egg_after_id = self.root.after(33, self._animate_easter_egg)
+        self._easter_egg_after_id = self.root.after(16, self._animate_easter_egg)
 
     def _toggle_editor_drawer(self):
         self.editor_open = not self.editor_open
@@ -2245,12 +4067,15 @@ class DashboardApp:
     def _start_tab_rename(self, tab_id: str):
         new_name = simpledialog.askstring("Rename Tab", "Tab name:", initialvalue=self.tabs[tab_id]["name"], parent=self.root)
         if new_name:
+            self._push_undo_state()
             self.tabs[tab_id]["name"] = new_name.strip() or self.tabs[tab_id]["name"]
             self._render_tab_buttons()
+            self._save_persisted_state()
 
     def _remove_tab(self, tab_id: str):
         if tab_id not in self.tabs or len(self.tab_order) <= 1:
             return
+        self._push_undo_state()
         remove_index = self.tab_order.index(tab_id)
         self.tab_order.remove(tab_id)
         del self.tabs[tab_id]
@@ -2260,6 +4085,7 @@ class DashboardApp:
         self._render_tab_buttons()
         self._populate_drawer()
         self._layout_panels()
+        self._save_persisted_state()
 
     def _show_tab_menu(self, event, tab_id: str):
         self._select_tab(tab_id)
@@ -2274,11 +4100,12 @@ class DashboardApp:
     def _start_demo_mode(self):
         if self.demo_running:
             return
+        self._disconnect_serial(save_state=False)
         self.demo_running = True
         self.demo_rpm = 1800
         self.demo_direction = 1
-        self.start_demo_button.config(state="disabled")
-        self.stop_demo_button.config(state="normal")
+        self._update_demo_controls()
+        self._update_connection_controls()
         self._queue_demo_line()
 
     def _stop_demo_mode(self):
@@ -2286,31 +4113,31 @@ class DashboardApp:
         if self.demo_after_id is not None:
             self.root.after_cancel(self.demo_after_id)
             self.demo_after_id = None
-        self.start_demo_button.config(state="normal")
-        self.stop_demo_button.config(state="disabled")
+        self._update_demo_controls()
+        self._update_connection_controls()
 
     def _queue_demo_line(self):
         if not self.demo_running:
             self.demo_after_id = None
             return
 
-        self.demo_rpm += self.demo_direction * random.randint(120, 320)
+        self.demo_rpm += self.demo_direction * random.randint(70, 180)
         if self.demo_rpm > 11200:
             self.demo_direction = -1
         elif self.demo_rpm < 1800:
             self.demo_direction = 1
 
         rpm = self.demo_rpm
-        ect = random.randint(82, 95)
-        oil_temp = random.randint(88, 108)
-        oil_pressure = random.randint(28, 78)
+        ect = random.randint(84, 93)
+        oil_temp = random.randint(90, 104)
+        oil_pressure = random.randint(32, 74)
         neutral_park = 1 if rpm < 2200 else 0
-        lambda1 = random.randint(88, 105)
-        tps = max(0, min(100, int((rpm / 15000) * 100) + random.randint(-4, 4)))
-        aps = max(0, min(100, tps + random.randint(-3, 3)))
+        lambda1 = random.randint(90, 102)
+        tps = max(0, min(100, int((rpm / 15000) * 100) + random.randint(-2, 2)))
+        aps = max(0, min(100, tps + random.randint(-2, 2)))
         gear = random.randint(2, 5)
-        wheel_speed = max(0, int((rpm / 120.0) + random.randint(-3, 3)))
-        fuel_pressure = random.randint(35, 72)
+        wheel_speed = max(0, int((rpm / 120.0) + random.randint(-2, 2)))
+        fuel_pressure = random.randint(40, 68)
 
         self._apply_demo_values(
             rpm=rpm,
@@ -2325,7 +4152,7 @@ class DashboardApp:
             wheel_speed=wheel_speed,
             fuel_pressure=fuel_pressure,
         )
-        self.demo_after_id = self.root.after(180, self._queue_demo_line)
+        self.demo_after_id = self.root.after(90, self._queue_demo_line)
 
     def _apply_demo_values(
         self,
@@ -2410,9 +4237,22 @@ class DashboardApp:
             self._rx_window_bytes = 0
 
     def _apply_line(self, line: str):
+        line = self._normalize_line(line)
+
+        if line.startswith("INFO: connected to "):
+            self.connection_state = "connected"
+            self._last_serial_error = ""
+            self._update_connection_controls()
+            return
+
+        if line.startswith("ERROR: serial "):
+            self.connection_state = "disconnected"
+            self._last_serial_error = line
+            self._update_connection_controls()
+            return
+
         self.state.touch(line)
         self._record_rx_throughput(line)
-        line = self._normalize_line(line)
 
         match = FRAME1_RE.fullmatch(line)
         if match:
@@ -2472,14 +4312,76 @@ class DashboardApp:
                     changed = True
         return line.strip()
 
-    def _history_points(self, name: str):
+    def _default_graph_window(self) -> float:
+        try:
+            return max(5.0, float(self.settings_model["graphs"].get("time_window_s", "30")))
+        except (TypeError, ValueError):
+            return 30.0
+
+    def _history_points(self, name: str, window_s: float | None = None):
         series = self.histories[name]
         if not series:
             return []
-        start = series[0][0]
-        return [(t - start, v) for t, v in series]
+        points = series
+        if window_s is not None and window_s > 0:
+            cutoff = series[-1][0] - window_s
+            points = [point for point in series if point[0] >= cutoff]
+            if not points:
+                points = [series[-1]]
+        start = points[0][0]
+        return [(t - start, v) for t, v in points]
+
+    def _graph_metrics_for_panel(self, panel_name: str):
+        mapping = {
+            "rpm_trend": ["rpm"],
+            "wheel_trend": ["wheel_speed"],
+            "tps_trend": ["tps"],
+            "aps_trend": ["aps"],
+            "gear_trend": ["gear"],
+            "oil_temp_trend_single": ["oil_temp"],
+            "coolant_trend": ["ect"],
+            "throughput_trend": ["throughput"],
+            "lambda_trend": ["lambda1"],
+            "fuel_pressure_trend_single": ["fuel_pressure"],
+            "oil_pressure_trend_single": ["oil_pressure"],
+            "throttle_trend": ["tps", "aps"],
+            "temp_trend": ["oil_temp", "ect"],
+            "pressure_trend": ["oil_pressure", "fuel_pressure"],
+        }
+        if panel_name in CUSTOM_GRAPH_PANEL_NAMES:
+            return [entry.get("key") for entry in self._current_custom_graphs().get(panel_name, []) if entry.get("key") in GRAPH_METRIC_OPTIONS]
+        return mapping.get(panel_name, [])
+
+    def _set_graph_paused(self, panel_name: str, paused: bool):
+        options = self._graph_panel_options.setdefault(panel_name, {"paused": False, "window_s": self._default_graph_window()})
+        options["paused"] = paused
+        if paused:
+            if panel_name in CUSTOM_GRAPH_PANEL_NAMES:
+                self._frozen_graph_series[panel_name] = self._custom_graph_series(panel_name)
+            else:
+                self._frozen_graph_series[panel_name] = self._graph_series_for_panel(panel_name)
+        else:
+            self._frozen_graph_series.pop(panel_name, None)
+
+    def _clear_graph(self, panel_name: str):
+        for metric_name in self._graph_metrics_for_panel(panel_name):
+            if metric_name in self.histories:
+                self.histories[metric_name].clear()
+        self._frozen_graph_series.pop(panel_name, None)
+
+    def _clear_all_graphs(self):
+        for series in self.histories.values():
+            series.clear()
+        self._frozen_graph_series.clear()
+
+    def _set_graph_window(self, panel_name: str, window_s: float):
+        options = self._graph_panel_options.setdefault(panel_name, {"paused": False, "window_s": self._default_graph_window()})
+        options["window_s"] = max(5.0, float(window_s))
+        if options.get("paused"):
+            self._set_graph_paused(panel_name, True)
 
     def _custom_graph_series(self, panel_name: str):
+        options = self._graph_panel_options.setdefault(panel_name, {"paused": False, "window_s": self._default_graph_window()})
         series = []
         for entry in self._current_custom_graphs().get(panel_name, []):
             key = entry.get("key")
@@ -2490,7 +4392,7 @@ class DashboardApp:
                 {
                     "label": meta["label"],
                     "color": entry.get("color", meta["color"]),
-                    "points": self._history_points(key),
+                    "points": self._history_points(key, options.get("window_s")),
                     "axis_min": meta.get("axis_min"),
                     "axis_max": meta.get("axis_max"),
                     "decimals": meta.get("decimals", 1),
@@ -2498,10 +4400,57 @@ class DashboardApp:
             )
         return series
 
+    def _graph_series_for_panel(self, panel_name: str):
+        window_s = self._graph_panel_options.setdefault(panel_name, {"paused": False, "window_s": self._default_graph_window()}).get("window_s")
+        if panel_name == "rpm_trend":
+            return [{"label": "rpm", "color": ACCENT, "points": self._history_points("rpm", window_s)}]
+        if panel_name == "wheel_trend":
+            return [{"label": "wheel", "color": ACCENT, "points": self._history_points("wheel_speed", window_s)}]
+        if panel_name == "tps_trend":
+            return [{"label": "tps", "color": ACCENT, "points": self._history_points("tps", window_s)}]
+        if panel_name == "aps_trend":
+            return [{"label": "aps", "color": ACCENT, "points": self._history_points("aps", window_s)}]
+        if panel_name == "gear_trend":
+            return [{"label": "gear", "color": ACCENT, "points": self._history_points("gear", window_s)}]
+        if panel_name == "oil_temp_trend_single":
+            return [{"label": "oil temp", "color": ACCENT, "points": self._history_points("oil_temp", window_s)}]
+        if panel_name == "coolant_trend":
+            return [{"label": "coolant", "color": ACCENT_2, "points": self._history_points("ect", window_s)}]
+        if panel_name == "throughput_trend":
+            return [{"label": "throughput", "color": ACCENT, "points": self._history_points("throughput", window_s)}]
+        if panel_name == "lambda_trend":
+            return [{"label": "lambda", "color": ACCENT, "points": self._history_points("lambda1", window_s)}]
+        if panel_name == "fuel_pressure_trend_single":
+            return [{"label": "fuel press", "color": ACCENT_2, "points": self._history_points("fuel_pressure", window_s)}]
+        if panel_name == "oil_pressure_trend_single":
+            return [{"label": "oil press", "color": ACCENT, "points": self._history_points("oil_pressure", window_s)}]
+        if panel_name == "throttle_trend":
+            return [
+                {"label": "tps", "color": ACCENT, "points": self._history_points("tps", window_s)},
+                {"label": "aps", "color": ACCENT_2, "points": self._history_points("aps", window_s)},
+            ]
+        if panel_name == "temp_trend":
+            return [
+                {"label": "oil temp", "color": ACCENT, "points": self._history_points("oil_temp", window_s)},
+                {"label": "coolant", "color": ACCENT_2, "points": self._history_points("ect", window_s)},
+            ]
+        if panel_name == "pressure_trend":
+            return [
+                {"label": "oil press", "color": ACCENT, "points": self._history_points("oil_pressure", window_s)},
+                {"label": "fuel press", "color": ACCENT_2, "points": self._history_points("fuel_pressure", window_s)},
+            ]
+        if panel_name in CUSTOM_GRAPH_PANEL_NAMES:
+            return self._custom_graph_series(panel_name)
+        return []
+
     def _refresh(self):
         self.state.animate_metrics()
-        critical_alerts = self._active_critical_alerts()
-        self.custom_trend.title = self._current_custom_graph_titles().get("custom_trend", "Custom Graph")
+        alert_level, active_alerts = self._active_alert_state()
+        current_titles = self._current_custom_graph_titles()
+        for index, panel_name in enumerate(CUSTOM_GRAPH_PANEL_NAMES, start=1):
+            widget = self.custom_trend_panels.get(panel_name)
+            if widget is not None:
+                widget.title = current_titles.get(panel_name, "Custom Graph" if index == 1 else f"Custom Graph {index}")
         if self._panel_visible("wheel_gauge"):
             self.wheel_gauge.set_value(self.state.wheel_speed)
         if self._panel_visible("tps_gauge"):
@@ -2522,21 +4471,41 @@ class DashboardApp:
             self.oil_pressure_gauge.set_value(self.state.oil_pressure)
 
         age = self.state.data_age_seconds
-        if age < 1.0:
-            link_state = "Live"
+        if self.serial_worker is None and not self.demo_running:
+            link_state = "Disconnected"
+            pill_bg = ACCENT_2
+        elif self.demo_running:
+            link_state = "Demo"
+            pill_bg = "#2E7D32"
+        elif self.connection_state == "connecting":
+            link_state = "Connecting"
+            pill_bg = WARNING
+        elif age < 1.0:
+            link_state = "Connected"
+            pill_bg = "#2E7D32"
         elif age < 3.0:
-            link_state = "Stale"
+            link_state = "No Data"
+            pill_bg = WARNING
         else:
-            link_state = "Offline"
-
-        pill_bg = "#2E7D32" if link_state == "Live" else WARNING if link_state == "Stale" else ACCENT_2
+            link_state = "Disconnected"
+            pill_bg = ACCENT_2
         self.status_pill.config(text=link_state.upper(), bg=pill_bg)
-        if critical_alerts:
-            self.critical_bar.config(text="CRITICAL: " + "  |  ".join(critical_alerts))
+        self.last_alert_pill.config(text=f"ALERT: {self.last_alert_text}", fg=MUTED if self.last_alert_text == "NONE" else TEXT)
+        if active_alerts:
+            self.last_alert_text = active_alerts[-1].upper()
+            if alert_level == "critical":
+                self.critical_bar.config(text="CRITICAL: " + "  |  ".join(active_alerts), bg=DANGER, fg=TEXT)
+                self.last_alert_pill.config(bg=DANGER, fg=TEXT)
+            else:
+                self.critical_bar.config(text="WARNING: " + "  |  ".join(active_alerts), bg=WARNING, fg=BACKGROUND)
+                self.last_alert_pill.config(bg=WARNING, fg=BACKGROUND)
             if self.critical_bar.winfo_manager() != "pack":
                 self.critical_bar.pack(fill="x", pady=(0, 8), before=self.tab_bar)
+            self._set_menu_entry_state(self.session_menu, "Ack Alerts", "normal")
         elif self.critical_bar.winfo_manager() == "pack":
             self.critical_bar.pack_forget()
+            self._set_menu_entry_state(self.session_menu, "Ack Alerts", "disabled")
+            self.last_alert_pill.config(bg=CARD_BG, fg=MUTED if self.last_alert_text == "NONE" else TEXT)
 
         gear_text = "--" if self.state.gear.rendered_value is None else str(int(round(self.state.gear.rendered_value)))
         if self._panel_visible("gear_stat"):
@@ -2544,69 +4513,32 @@ class DashboardApp:
         throughput_value = self.state.throughput.rendered_value
         throughput_text = "--" if throughput_value is None else f"{throughput_value:.1f} kbps"
         self.throughput_pill.config(text=throughput_text)
+        self._handle_logging()
         now = time.monotonic()
         if now - self._last_graph_refresh_monotonic >= (self.GRAPH_REFRESH_MS / 1000.0):
-            if self._panel_visible("rpm_trend"):
-                self.rpm_trend.set_series([
-                    {"label": "rpm", "color": ACCENT, "points": self._history_points("rpm")},
-                ])
-            if self._panel_visible("wheel_trend"):
-                self.wheel_trend.set_series([
-                    {"label": "wheel", "color": ACCENT, "points": self._history_points("wheel_speed")},
-                ])
-            if self._panel_visible("tps_trend"):
-                self.tps_trend.set_series([
-                    {"label": "tps", "color": ACCENT, "points": self._history_points("tps")},
-                ])
-            if self._panel_visible("aps_trend"):
-                self.aps_trend.set_series([
-                    {"label": "aps", "color": ACCENT, "points": self._history_points("aps")},
-                ])
-            if self._panel_visible("gear_trend"):
-                self.gear_trend.set_series([
-                    {"label": "gear", "color": ACCENT, "points": self._history_points("gear")},
-                ])
-            if self._panel_visible("oil_temp_trend_single"):
-                self.oil_temp_trend_single.set_series([
-                    {"label": "oil temp", "color": ACCENT, "points": self._history_points("oil_temp")},
-                ])
-            if self._panel_visible("coolant_trend"):
-                self.coolant_trend.set_series([
-                    {"label": "coolant", "color": ACCENT_2, "points": self._history_points("ect")},
-                ])
-            if self._panel_visible("throughput_trend"):
-                self.throughput_trend.set_series([
-                    {"label": "throughput", "color": ACCENT, "points": self._history_points("throughput")},
-                ])
-            if self._panel_visible("lambda_trend"):
-                self.lambda_trend.set_series([
-                    {"label": "lambda", "color": ACCENT, "points": self._history_points("lambda1")},
-                ])
-            if self._panel_visible("fuel_pressure_trend_single"):
-                self.fuel_pressure_trend_single.set_series([
-                    {"label": "fuel press", "color": ACCENT_2, "points": self._history_points("fuel_pressure")},
-                ])
-            if self._panel_visible("oil_pressure_trend_single"):
-                self.oil_pressure_trend_single.set_series([
-                    {"label": "oil press", "color": ACCENT, "points": self._history_points("oil_pressure")},
-                ])
-            if self._panel_visible("throttle_trend"):
-                self.throttle_trend.set_series([
-                    {"label": "tps", "color": ACCENT, "points": self._history_points("tps")},
-                    {"label": "aps", "color": ACCENT_2, "points": self._history_points("aps")},
-                ])
-            if self._panel_visible("temp_trend"):
-                self.temp_trend.set_series([
-                    {"label": "oil temp", "color": ACCENT, "points": self._history_points("oil_temp")},
-                    {"label": "coolant", "color": ACCENT_2, "points": self._history_points("ect")},
-                ])
-            if self._panel_visible("pressure_trend"):
-                self.pressure_trend.set_series([
-                    {"label": "oil press", "color": ACCENT, "points": self._history_points("oil_pressure")},
-                    {"label": "fuel press", "color": ACCENT_2, "points": self._history_points("fuel_pressure")},
-                ])
-            if self._panel_visible("custom_trend"):
-                self.custom_trend.set_series(self._custom_graph_series("custom_trend"))
+            for panel_name, widget in [
+                ("rpm_trend", self.rpm_trend),
+                ("wheel_trend", self.wheel_trend),
+                ("tps_trend", self.tps_trend),
+                ("aps_trend", self.aps_trend),
+                ("gear_trend", self.gear_trend),
+                ("oil_temp_trend_single", self.oil_temp_trend_single),
+                ("coolant_trend", self.coolant_trend),
+                ("throughput_trend", self.throughput_trend),
+                ("lambda_trend", self.lambda_trend),
+                ("fuel_pressure_trend_single", self.fuel_pressure_trend_single),
+                ("oil_pressure_trend_single", self.oil_pressure_trend_single),
+                ("throttle_trend", self.throttle_trend),
+                ("temp_trend", self.temp_trend),
+                ("pressure_trend", self.pressure_trend),
+            ]:
+                if self._panel_visible(panel_name):
+                    series = self._frozen_graph_series.get(panel_name) if self._graph_panel_options.get(panel_name, {}).get("paused") else self._graph_series_for_panel(panel_name)
+                    widget.set_series(series)
+            for panel_name, widget in self.custom_trend_panels.items():
+                if self._panel_visible(panel_name):
+                    series = self._frozen_graph_series.get(panel_name) if self._graph_panel_options.get(panel_name, {}).get("paused") else self._custom_graph_series(panel_name)
+                    widget.set_series(series)
             self._last_graph_refresh_monotonic = now
 
         self.root.after(self.LIVE_REFRESH_MS, self._refresh)
@@ -2616,7 +4548,8 @@ class DashboardApp:
 
     def _load_logo_image(self):
         if Image is None or ImageTk is None:
-            self.logo_image = None
+            self.header_logo_image = None
+            self.tach_logo_image = None
             return
 
         base_dir = Path(__file__).resolve().parent
@@ -2633,10 +4566,15 @@ class DashboardApp:
             logo = Image.open(logo_path)
             if logo.mode != "RGBA":
                 logo = logo.convert("RGBA")
-            logo.thumbnail((30, 30), Image.Resampling.LANCZOS)
-            self.logo_image = ImageTk.PhotoImage(logo)
+            header_logo = logo.copy()
+            header_logo.thumbnail((30, 30), Image.Resampling.LANCZOS)
+            tach_logo = logo.copy()
+            tach_logo.thumbnail((92, 92), Image.Resampling.LANCZOS)
+            self.header_logo_image = ImageTk.PhotoImage(header_logo)
+            self.tach_logo_image = ImageTk.PhotoImage(tach_logo)
         else:
-            self.logo_image = None
+            self.header_logo_image = None
+            self.tach_logo_image = None
 
 
 def parse_args():
@@ -2653,12 +4591,7 @@ def main():
     root = tk.Tk()
     state = DashboardState()
     line_queue: queue.Queue[str] = queue.Queue()
-
-    if not args.demo:
-        worker = SerialWorker(args.port, args.baudrate, line_queue, False)
-        worker.start()
-
-    DashboardApp(root, state, line_queue, args.port if not args.demo else "DEMO", initial_demo=args.demo)
+    DashboardApp(root, state, line_queue, args.port if not args.demo else "DEMO", args.baudrate, initial_demo=args.demo)
     root.mainloop()
 
 

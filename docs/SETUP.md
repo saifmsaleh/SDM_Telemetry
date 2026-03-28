@@ -33,6 +33,8 @@ Recommended:
 $env:IDF_PATH = 'C:\Espressif\frameworks\esp-idf-v5.1.1'
 ```
 
+If ESP-IDF is not installed, the AP/STA monitor scripts still work as plain serial monitors.
+
 ## Launch
 
 Dashboard:
@@ -67,7 +69,6 @@ powershell -ExecutionPolicy Bypass -File .\scripts\open_rp2350_monitor.ps1 -Port
 
 ## Notes
 
-- The AP/STA monitor scripts still expect the firmware ELF files to exist in:
-  - `examples/chat_ap/build/chat_ap.elf`
-  - `examples/chat_sta/build/chat_sta.elf`
-- The telemetry repo is portable, but those monitor scripts depend on the parent repo still containing the ESP example firmware builds.
+- If the firmware ELF files are available, the AP/STA scripts use `idf_monitor.py`.
+- If the ELF files are missing, they automatically fall back to plain serial monitoring.
+- That means the telemetry repo can be downloaded from GitHub and the monitor scripts still work without the full parent repo build outputs.

@@ -5,6 +5,37 @@ param(
     [string]$IdfPath
 )
 
+function Start-RawSerialMonitor {
+    param(
+        [string]$TargetPort,
+        [int]$TargetBaud
+    )
+
+    $serial = New-Object System.IO.Ports.SerialPort $TargetPort, $TargetBaud, "None", 8, "one"
+    $serial.NewLine = "`n"
+    $serial.ReadTimeout = 1000
+
+    try {
+        $serial.Open()
+        Write-Host "STA raw serial monitor on $TargetPort @ $TargetBaud. Press Ctrl+C to stop." -ForegroundColor Yellow
+        while ($true) {
+            try {
+                $line = $serial.ReadLine()
+                if ($line -ne $null) {
+                    Write-Host $line.TrimEnd("`r", "`n")
+                }
+            }
+            catch [System.TimeoutException] {
+            }
+        }
+    }
+    finally {
+        if ($serial.IsOpen) {
+            $serial.Close()
+        }
+    }
+}
+
 function Resolve-PythonCommand {
     param([string]$PreferredPython)
 
@@ -54,18 +85,20 @@ $telemetryRoot = Split-Path $PSScriptRoot -Parent
 $repoRoot = Split-Path $telemetryRoot -Parent
 $elfPath = Join-Path $repoRoot "examples\chat_sta\build\chat_sta.elf"
 
-if (-not (Test-Path -LiteralPath $elfPath)) {
-    Write-Error "STA ELF not found: $elfPath"
-    exit 1
-}
-
 try {
     $pythonCmd = Resolve-PythonCommand -PreferredPython $Python
     $monitorPy = Resolve-IdfMonitorPath -PreferredIdfPath $IdfPath
 }
 catch {
-    Write-Error $_.Exception.Message
-    exit 1
+    Write-Warning $_.Exception.Message
+    Start-RawSerialMonitor -TargetPort $Port -TargetBaud $Baud
+    exit 0
+}
+
+if (-not (Test-Path -LiteralPath $elfPath)) {
+    Write-Warning "STA ELF not found, falling back to raw serial monitor: $elfPath"
+    Start-RawSerialMonitor -TargetPort $Port -TargetBaud $Baud
+    exit 0
 }
 
 & $pythonCmd[0] @($pythonCmd[1..($pythonCmd.Length - 1)]) $monitorPy -p "\\.\$Port" -b $Baud $elfPath

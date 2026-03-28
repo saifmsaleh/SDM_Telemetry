@@ -7,9 +7,9 @@ These PowerShell scripts are provided so the telemetry folder is usable without 
 - `scripts/open_dashboard.ps1`
   - Launches the dashboard GUI on a serial port
 - `scripts/open_sta_monitor.ps1`
-  - Opens the ESP-IDF monitor for the STA board
+  - Opens the ESP-IDF monitor for the STA board when available, otherwise falls back to raw serial
 - `scripts/open_ap_monitor.ps1`
-  - Opens the ESP-IDF monitor for the AP board
+  - Opens the ESP-IDF monitor for the AP board when available, otherwise falls back to raw serial
 - `scripts/open_rp2350_monitor.ps1`
   - Opens a simple serial line monitor for the RP2350 bridge
 
@@ -62,13 +62,11 @@ powershell -ExecutionPolicy Bypass -File .\scripts\open_rp2350_monitor.ps1 -Port
 
 ## Notes
 
-- `open_sta_monitor.ps1` and `open_ap_monitor.ps1` expect the firmware ELFs to exist at:
-  - `examples/chat_sta/build/chat_sta.elf`
-  - `examples/chat_ap/build/chat_ap.elf`
 - `idf_monitor.py` is resolved from:
   - `IDF_MONITOR_PY`
   - `IDF_PATH`
   - or a script argument like `-IdfPath C:\path\to\esp-idf`
+- If `idf_monitor.py` or the firmware ELF is not available, the AP/STA scripts automatically fall back to a plain serial monitor.
 - `idf_monitor.py` is used directly because it is more reliable for this setup than `idf.py monitor`.
 - Exit the ESP-IDF monitor with `Ctrl+]`.
-- Stop the RP2350 serial monitor with `Ctrl+C`.
+- Stop the raw serial monitors with `Ctrl+C`.
