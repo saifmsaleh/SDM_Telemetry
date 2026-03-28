@@ -29,6 +29,12 @@ Dashboard:
 powershell -ExecutionPolicy Bypass -File .\scripts\open_dashboard.ps1 -Port COM12
 ```
 
+You can force a specific Python executable if needed:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\open_dashboard.ps1 -Port COM12 -Python python
+```
+
 STA monitor:
 
 ```powershell
@@ -59,6 +65,10 @@ powershell -ExecutionPolicy Bypass -File .\scripts\open_rp2350_monitor.ps1 -Port
 - `open_sta_monitor.ps1` and `open_ap_monitor.ps1` expect the firmware ELFs to exist at:
   - `examples/chat_sta/build/chat_sta.elf`
   - `examples/chat_ap/build/chat_ap.elf`
+- `idf_monitor.py` is resolved from:
+  - `IDF_MONITOR_PY`
+  - `IDF_PATH`
+  - or a script argument like `-IdfPath C:\path\to\esp-idf`
 - `idf_monitor.py` is used directly because it is more reliable for this setup than `idf.py monitor`.
 - Exit the ESP-IDF monitor with `Ctrl+]`.
 - Stop the RP2350 serial monitor with `Ctrl+C`.

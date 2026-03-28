@@ -11,6 +11,7 @@ This folder contains the custom telemetry dashboard, RP2350 bridge script, suppo
 - `docs/`
   - `CAN_BRIDGE_INSTRUCTIONS.md`
   - `MONITORS.md`
+  - `SETUP.md`
 - `scripts/`
   - monitor and dashboard launchers
 - `assets/logos/`
@@ -31,12 +32,12 @@ powershell -ExecutionPolicy Bypass -File .\scripts\open_dashboard.ps1 -Port COM1
 Demo mode:
 
 ```powershell
-C:\Users\Saif\anaconda3\python.exe C:\Users\Saif\mm-iot-esp32\telemetry\dashboard\can_dashboard_gui.py --demo
+powershell -ExecutionPolicy Bypass -File .\scripts\open_dashboard.ps1 -Demo
 ```
 
 ## Monitors
 
-See [MONITORS.md](C:\Users\Saif\mm-iot-esp32\telemetry\docs\MONITORS.md) for monitor usage.
+See `docs/MONITORS.md` for monitor usage and `docs/SETUP.md` for setup.
 
 Quick launch examples:
 
@@ -57,3 +58,4 @@ powershell -ExecutionPolicy Bypass -File .\scripts\open_rp2350_monitor.ps1 -Port
 - The dashboard loads its team logo from `assets/logos/`.
 - The settings UI is GUI-side only unless explicitly wired into the decoder later.
 - Reference images are kept out of the runtime folders so the repo is easier to navigate.
+- Python dependencies are listed in `requirements.txt`.
