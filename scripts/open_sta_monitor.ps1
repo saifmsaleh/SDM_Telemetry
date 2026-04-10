@@ -27,6 +27,12 @@ function Start-RawSerialMonitor {
             }
             catch [System.TimeoutException] {
             }
+            catch [System.IO.IOException] {
+                Start-Sleep -Milliseconds 200
+            }
+            catch [System.InvalidOperationException] {
+                break
+            }
         }
     }
     finally {
@@ -45,6 +51,20 @@ function Resolve-PythonCommand {
             return @($cmd.Source)
         }
         throw "Requested Python executable was not found on PATH: $PreferredPython"
+    }
+
+    $idfPythonCandidates = @()
+    if ($env:IDF_PYTHON_ENV_PATH) {
+        $idfPythonCandidates += (Join-Path $env:IDF_PYTHON_ENV_PATH "Scripts\python.exe")
+    }
+    if ($env:IDF_TOOLS_PATH) {
+        $idfPythonCandidates += (Join-Path $env:IDF_TOOLS_PATH "python_env\idf5.1_py3.11_env\Scripts\python.exe")
+    }
+
+    foreach ($candidatePath in $idfPythonCandidates) {
+        if ($candidatePath -and (Test-Path -LiteralPath $candidatePath)) {
+            return @($candidatePath)
+        }
     }
 
     foreach ($candidate in @("py", "python")) {
@@ -86,7 +106,7 @@ $repoRoot = Split-Path $telemetryRoot -Parent
 $elfPath = Join-Path $repoRoot "examples\chat_sta\build\chat_sta.elf"
 
 try {
-    $pythonCmd = Resolve-PythonCommand -PreferredPython $Python
+    $pythonCmd = @(Resolve-PythonCommand -PreferredPython $Python)
     $monitorPy = Resolve-IdfMonitorPath -PreferredIdfPath $IdfPath
 }
 catch {
@@ -101,4 +121,9 @@ if (-not (Test-Path -LiteralPath $elfPath)) {
     exit 0
 }
 
-& $pythonCmd[0] @($pythonCmd[1..($pythonCmd.Length - 1)]) $monitorPy -p "\\.\$Port" -b $Baud $elfPath
+$pythonArgs = @()
+if ($pythonCmd.Length -gt 1) {
+    $pythonArgs += $pythonCmd[1..($pythonCmd.Length - 1)]
+}
+$pythonArgs += @($monitorPy, "-p", "\\.\$Port", "-b", $Baud, $elfPath)
+& $pythonCmd[0] @pythonArgs

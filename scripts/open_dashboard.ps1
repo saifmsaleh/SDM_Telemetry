@@ -15,13 +15,26 @@ function Resolve-PythonCommand {
         throw "Requested Python executable was not found on PATH: $PreferredPython"
     }
 
-    foreach ($candidate in @("py", "python")) {
+    foreach ($candidate in @("python", "py")) {
         $cmd = Get-Command $candidate -ErrorAction SilentlyContinue
         if ($cmd) {
-            if ($candidate -eq "py") {
-                return @($cmd.Source, "-3")
+            try {
+                if ($candidate -eq "py") {
+                    & $cmd.Source -3 -c "import sys" *> $null
+                    if ($LASTEXITCODE -eq 0) {
+                        return @($cmd.Source, "-3")
+                    }
+                }
+                else {
+                    & $cmd.Source -c "import sys" *> $null
+                    if ($LASTEXITCODE -eq 0) {
+                        return @($cmd.Source)
+                    }
+                }
             }
-            return @($cmd.Source)
+            catch {
+                continue
+            }
         }
     }
 
@@ -37,7 +50,7 @@ if (-not (Test-Path -LiteralPath $dashboardPath)) {
 }
 
 try {
-    $pythonCmd = Resolve-PythonCommand -PreferredPython $Python
+    $pythonCmd = @(Resolve-PythonCommand -PreferredPython $Python)
 }
 catch {
     Write-Error $_.Exception.Message
@@ -52,4 +65,9 @@ else {
     $argsList += @("--port", $Port)
 }
 
-& $pythonCmd[0] @($pythonCmd[1..($pythonCmd.Length - 1)]) @argsList
+$pythonArgs = @()
+if ($pythonCmd.Length -gt 1) {
+    $pythonArgs += $pythonCmd[1..($pythonCmd.Length - 1)]
+}
+$pythonArgs += $argsList
+& $pythonCmd[0] @pythonArgs

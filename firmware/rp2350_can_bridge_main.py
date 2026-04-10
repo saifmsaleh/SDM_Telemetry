@@ -9,8 +9,8 @@ import time
 #   XL2515 MISO -> GPIO12
 #
 # UART bridge wiring to the ESP32 HaLow AP board:
-#   RP2350 GP0/TX -> ESP32 GPIO44/RX
-#   RP2350 GP1/RX -> ESP32 GPIO43/TX
+#   RP2350 GP4/TX -> ESP32 GPIO7/RX
+#   RP2350 GP5/RX -> optional ESP32 TX (unused for one-way bridge)
 
 
 class MCP2515:
@@ -195,10 +195,10 @@ class MCP2515:
         return None
 
 
-UART_ID = 0
+UART_ID = 1
 UART_BAUD_RATE = 115200
-UART_TX_PIN = 0
-UART_RX_PIN = 1
+UART_TX_PIN = 4
+UART_RX_PIN = 5
 
 SPI_ID = 1
 SPI_BAUD_RATE = 1_000_000
@@ -215,10 +215,14 @@ BITRATE_SCAN_MS = 3000
 
 TRANSLATED_IDS = {
     0x3E8: "ECU_STREAM2",
+    0x3E9: "ECU_RPM_FAST",
+    0x3EA: "ECU_PRESSURES",
+    0x3EB: "ECU_TEMPS",
 }
 
 FORWARD_ONLY_TRANSLATED_IDS = True
 FORWARD_ONLY_STREAMS_AND_PDM = True
+MONITOR_ONLY_IDS = (0x3E9, 0x3EA, 0x3EB)
 
 
 uart = UART(
@@ -248,10 +252,11 @@ can = MCP2515(
 )
 
 
-def send_bridge_line(line):
+def send_bridge_line(line, echo=True):
     uart.write(line)
     uart.write("\n")
-    print("UART OUT:", line)
+    if echo:
+        print("UART OUT:", line)
 
 
 def format_can_frame(frame):
@@ -311,8 +316,8 @@ def format_stream2_frame(frame):
         neutral_park = read_be_unsigned(data, 56, 8)
 
         return (
-            "ECU Frame1 "
-            "rpm={} ect={} oil_temp={} oil_pressure={} neutral_park={} raw={}"
+            "ECU Stream2 Frame1 "
+            "id=3E8 rpm={} ect={} oil_temp={} oil_pressure={} neutral_park={} raw={}"
         ).format(
             engine_speed,
             ect,
@@ -330,8 +335,8 @@ def format_stream2_frame(frame):
         oil_pressure = read_be_unsigned(data, 40, 16)
 
         return (
-            "ECU Frame2 "
-            "lambda1_raw={} tps_main_raw={} gear_status={} "
+            "ECU Stream2 Frame2 "
+            "id=3E8 lambda1_raw={} tps_main_raw={} gear_status={} "
             "driven_wheel_speed={} oil_pressure={} raw={}"
         ).format(
             lambda1,
@@ -347,8 +352,8 @@ def format_stream2_frame(frame):
         fuel_pressure = read_be_unsigned(data, 24, 16)
 
         return (
-            "ECU Frame3 "
-            "aps_main_raw={} fuel_pressure={} raw={}"
+            "ECU Stream2 Frame3 "
+            "id=3E8 aps_main_raw={} fuel_pressure={} raw={}"
         ).format(
             aps_main,
             fuel_pressure,
@@ -356,14 +361,67 @@ def format_stream2_frame(frame):
         )
 
     if len(data) >= 1:
-        return "ECU Stream2 Frame{} raw={}".format(frame_selector + 1, data.hex().upper())
+        return "ECU Stream2 Frame{} id=3E8 raw={}".format(frame_selector + 1, data.hex().upper())
 
-    return "ECU Stream2 raw={}".format(data.hex().upper())
+    return "ECU Stream2 id=3E8 raw={}".format(data.hex().upper())
+
+
+def format_rpm_fast_frame(frame):
+    data = frame["data"]
+    if len(data) >= 6:
+        engine_speed = read_be_unsigned(data, 8, 16)
+        tps_main = read_be_unsigned(data, 24, 8)
+        aps_main = read_be_unsigned(data, 32, 8)
+        lambda1 = read_be_unsigned(data, 40, 8)
+        return "ECU Stream5 Frame1 id=3E9 rpm={} tps={} aps={} lambda1={} raw={}".format(
+            engine_speed,
+            tps_main,
+            aps_main,
+            lambda1,
+            data.hex().upper(),
+        )
+    return "ECU Stream5 Frame1 id=3E9 raw={}".format(data.hex().upper())
+
+
+def format_pressures_frame(frame):
+    data = frame["data"]
+    if len(data) >= 7:
+        oil_pressure = read_be_unsigned(data, 8, 16)
+        fuel_pressure = read_be_unsigned(data, 24, 16)
+        map_value = read_be_unsigned(data, 40, 16)
+        return (
+            "ECU Stream6 Frame1 id=3EA oil_pressure={} fuel_pressure={} map={} raw={}"
+        ).format(
+            oil_pressure,
+            fuel_pressure,
+            map_value,
+            data.hex().upper(),
+        )
+    return "ECU Stream6 Frame1 id=3EA raw={}".format(data.hex().upper())
+
+
+def format_temps_frame(frame):
+    data = frame["data"]
+    if len(data) >= 6:
+        ect = data[4]
+        oil_temp = data[5]
+        return "ECU Stream7 Frame1 id=3EB ect={} oil_temp={} raw={}".format(
+            ect,
+            oil_temp,
+            data.hex().upper(),
+        )
+    return "ECU Stream7 Frame1 id=3EB raw={}".format(data.hex().upper())
 
 
 def format_forward_line(frame):
     if frame["id"] == 0x3E8:
         return format_stream2_frame(frame)
+    if frame["id"] == 0x3E9:
+        return format_rpm_fast_frame(frame)
+    if frame["id"] == 0x3EA:
+        return format_pressures_frame(frame)
+    if frame["id"] == 0x3EB:
+        return format_temps_frame(frame)
     return format_can_frame(frame)
 
 
@@ -395,8 +453,14 @@ def should_forward_frame(frame):
 
     if frame["id"] == 0x3E8 and len(frame["data"]) > 0 and frame["data"][0] in (0, 1, 2):
         return True
+    if frame["id"] in (0x3E9, 0x3EA, 0x3EB):
+        return True
 
     return False
+
+
+def should_echo_frame(frame):
+    return frame["id"] in MONITOR_ONLY_IDS
 
 
 def try_detect_bitrate():
@@ -465,7 +529,7 @@ def main():
 
     if first_frame is not None:
         if should_forward_frame(first_frame):
-            send_bridge_line(format_forward_line(first_frame))
+            send_bridge_line(format_forward_line(first_frame), echo=should_echo_frame(first_frame))
 
     while True:
         poll_uart_inbound()
@@ -476,7 +540,7 @@ def main():
                 break
 
             if should_forward_frame(frame):
-                send_bridge_line(format_forward_line(frame))
+                send_bridge_line(format_forward_line(frame), echo=should_echo_frame(frame))
 
         time.sleep_ms(10)
 

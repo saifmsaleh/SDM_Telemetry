@@ -43,32 +43,35 @@ TEXT = "#E7EAF0"
 MUTED = "#9DA6B5"
 ACCENT = "#F4B41A"
 ACCENT_2 = "#8C1D40"
+HALOW_ACCENT = "#7DD3FC"
 WARNING = "#F3C746"
 DANGER = "#C25170"
 GRID = "#232833"
 TRACK = "#242933"
-GAP_XS = 6
+GAP_XS = 4
 GAP_SM = 8
 GAP_MD = 12
 GAP_LG = 16
 GAP_XL = 24
-PILL_FONT = ("Consolas", 10, "bold")
+PILL_FONT = ("Bahnschrift SemiBold", 10)
 LABEL_FONT = ("Bahnschrift SemiBold", 11)
 PERSISTED_STATE_FILE = "dashboard_state.json"
 PROFILES_DIR_NAME = "profiles"
 CUSTOM_GRAPH_PANEL_NAMES = ("custom_trend", "custom_trend_2", "custom_trend_3", "custom_trend_4")
+CORE_TAB_NAMES = {"LIVE", "LOGGING"}
 
 DEFAULT_PANEL_LAYOUTS = {
-    "wheel_gauge": {"x": 0.015, "y": 0.04, "w": 0.20, "h": 0.18, "visible": False},
-    "tps_gauge": {"x": 0.015, "y": 0.25, "w": 0.20, "h": 0.18, "visible": False},
-    "aps_gauge": {"x": 0.015, "y": 0.46, "w": 0.20, "h": 0.18, "visible": False},
-    "gear_stat": {"x": 0.015, "y": 0.67, "w": 0.20, "h": 0.18, "visible": False},
-    "oil_temp_gauge": {"x": 0.785, "y": 0.04, "w": 0.20, "h": 0.145, "visible": False},
-    "coolant_gauge": {"x": 0.785, "y": 0.225, "w": 0.20, "h": 0.145, "visible": False},
-    "lambda_gauge": {"x": 0.785, "y": 0.41, "w": 0.20, "h": 0.145, "visible": False},
-    "fuel_pressure_gauge": {"x": 0.785, "y": 0.595, "w": 0.20, "h": 0.145, "visible": False},
-    "oil_pressure_gauge": {"x": 0.785, "y": 0.78, "w": 0.20, "h": 0.145, "visible": False},
-    "rpm_tach": {"x": 0.225, "y": 0.04, "w": 0.55, "h": 0.86, "visible": False},
+    "wheel_gauge": {"x": 0.015, "y": 0.04, "w": 0.215, "h": 0.19, "visible": False},
+    "tps_gauge": {"x": 0.015, "y": 0.255, "w": 0.215, "h": 0.19, "visible": False},
+    "aps_gauge": {"x": 0.015, "y": 0.47, "w": 0.215, "h": 0.19, "visible": False},
+    "gear_stat": {"x": 0.015, "y": 0.685, "w": 0.215, "h": 0.19, "visible": False},
+    "oil_temp_gauge": {"x": 0.77, "y": 0.04, "w": 0.215, "h": 0.125, "visible": False},
+    "coolant_gauge": {"x": 0.77, "y": 0.175, "w": 0.215, "h": 0.125, "visible": False},
+    "lambda_gauge": {"x": 0.77, "y": 0.31, "w": 0.215, "h": 0.125, "visible": False},
+    "map_gauge": {"x": 0.77, "y": 0.445, "w": 0.215, "h": 0.125, "visible": False},
+    "fuel_pressure_gauge": {"x": 0.77, "y": 0.58, "w": 0.215, "h": 0.125, "visible": False},
+    "oil_pressure_gauge": {"x": 0.77, "y": 0.715, "w": 0.215, "h": 0.125, "visible": False},
+    "rpm_tach": {"x": 0.24, "y": 0.035, "w": 0.515, "h": 0.89, "visible": False},
     "rpm_trend": {"x": 0.02, "y": 0.02, "w": 0.31, "h": 0.20, "visible": False},
     "wheel_trend": {"x": 0.35, "y": 0.02, "w": 0.31, "h": 0.20, "visible": False},
     "tps_trend": {"x": 0.68, "y": 0.02, "w": 0.30, "h": 0.20, "visible": False},
@@ -80,9 +83,10 @@ DEFAULT_PANEL_LAYOUTS = {
     "lambda_trend": {"x": 0.68, "y": 0.52, "w": 0.30, "h": 0.20, "visible": False},
     "fuel_pressure_trend_single": {"x": 0.02, "y": 0.77, "w": 0.31, "h": 0.20, "visible": False},
     "oil_pressure_trend_single": {"x": 0.35, "y": 0.77, "w": 0.31, "h": 0.20, "visible": False},
-    "throttle_trend": {"x": 0.68, "y": 0.77, "w": 0.30, "h": 0.20, "visible": False},
-    "temp_trend": {"x": 0.02, "y": 1.02, "w": 0.48, "h": 0.20, "visible": False},
-    "pressure_trend": {"x": 0.52, "y": 1.02, "w": 0.46, "h": 0.20, "visible": False},
+    "map_trend": {"x": 0.68, "y": 0.77, "w": 0.30, "h": 0.20, "visible": False},
+    "throttle_trend": {"x": 0.02, "y": 1.02, "w": 0.31, "h": 0.20, "visible": False},
+    "temp_trend": {"x": 0.35, "y": 1.02, "w": 0.31, "h": 0.20, "visible": False},
+    "pressure_trend": {"x": 0.68, "y": 1.02, "w": 0.30, "h": 0.20, "visible": False},
     "custom_trend": {"x": 0.20, "y": 0.20, "w": 0.56, "h": 0.28, "visible": False},
     "custom_trend_2": {"x": 0.18, "y": 0.52, "w": 0.56, "h": 0.28, "visible": False},
     "custom_trend_3": {"x": 0.08, "y": 0.16, "w": 0.40, "h": 0.24, "visible": False},
@@ -90,8 +94,8 @@ DEFAULT_PANEL_LAYOUTS = {
 }
 
 PANEL_MIN_SIZE = {
-    "default": (170, 120),
-    "trend": (360, 180),
+    "default": (220, 150),
+    "trend": (420, 240),
 }
 
 PANEL_DEFS = {
@@ -103,6 +107,7 @@ PANEL_DEFS = {
     "coolant_gauge": {"label": "Coolant Temp", "section": "live"},
     "rpm_tach": {"label": "Engine Speed", "section": "live"},
     "lambda_gauge": {"label": "Lambda", "section": "live"},
+    "map_gauge": {"label": "MAP", "section": "live"},
     "fuel_pressure_gauge": {"label": "Fuel Pressure", "section": "live"},
     "oil_pressure_gauge": {"label": "Oil Pressure", "section": "live"},
     "rpm_trend": {"label": "RPM Graph", "section": "graphs"},
@@ -112,10 +117,11 @@ PANEL_DEFS = {
     "gear_trend": {"label": "Gear Graph", "section": "graphs"},
     "oil_temp_trend_single": {"label": "Oil Temp Graph", "section": "graphs"},
     "coolant_trend": {"label": "Coolant Graph", "section": "graphs"},
-    "throughput_trend": {"label": "Throughput Graph", "section": "graphs"},
+    "throughput_trend": {"label": "Payload Rate Graph", "section": "graphs"},
     "lambda_trend": {"label": "Lambda Graph", "section": "graphs"},
     "fuel_pressure_trend_single": {"label": "Fuel Pressure Graph", "section": "graphs"},
     "oil_pressure_trend_single": {"label": "Oil Pressure Graph", "section": "graphs"},
+    "map_trend": {"label": "MAP Graph", "section": "graphs"},
     "throttle_trend": {"label": "Throttle Graph", "section": "graphs"},
     "temp_trend": {"label": "Temp Graph", "section": "graphs"},
     "pressure_trend": {"label": "Pressure Graph", "section": "graphs"},
@@ -129,14 +135,15 @@ GRAPH_METRIC_OPTIONS = {
     "rpm": {"label": "RPM", "color": ACCENT, "axis_min": 0.0, "axis_max": 15000.0, "decimals": 0},
     "tps": {"label": "TPS", "color": ACCENT, "axis_min": 0.0, "axis_max": 100.0, "decimals": 0},
     "aps": {"label": "APS", "color": ACCENT_2, "axis_min": 0.0, "axis_max": 100.0, "decimals": 0},
-    "lambda1": {"label": "Lambda", "color": WARNING, "axis_min": 0.0, "axis_max": 2.0, "decimals": 2},
+    "lambda1": {"label": "Lambda", "color": WARNING, "axis_min": 0.0, "axis_max": 20.0, "decimals": 1},
     "wheel_speed": {"label": "Wheel Speed", "color": "#68D391", "axis_min": 0.0, "axis_max": 220.0, "decimals": 0},
     "gear": {"label": "Gear", "color": "#63B3ED", "axis_min": 0.0, "axis_max": 6.0, "decimals": 0},
     "oil_temp": {"label": "Oil Temp", "color": ACCENT, "axis_min": 0.0, "axis_max": 140.0, "decimals": 0},
     "ect": {"label": "Coolant Temp", "color": ACCENT_2, "axis_min": 0.0, "axis_max": 130.0, "decimals": 0},
     "fuel_pressure": {"label": "Fuel Pressure", "color": "#4FD1C5", "axis_min": 0.0, "axis_max": 200.0, "decimals": 0},
     "oil_pressure": {"label": "Oil Pressure", "color": "#F6AD55", "axis_min": 0.0, "axis_max": 200.0, "decimals": 0},
-    "throughput": {"label": "Throughput", "color": "#B794F4", "axis_min": 0.0, "axis_max": 2500.0, "decimals": 0},
+    "map": {"label": "MAP", "color": "#A3E635", "axis_min": 0.0, "axis_max": 200.0, "decimals": 0},
+    "throughput": {"label": "Payload Rate", "color": "#B794F4", "axis_min": 0.0, "axis_max": 2500.0, "decimals": 0},
 }
 
 RPM_MAX = 15000
@@ -167,6 +174,32 @@ FRAME3_RE = re.compile(
     r"fuel_pressure=(?P<fuel_pressure>\d+) "
     r"raw=(?P<raw>[0-9A-F]+)"
 )
+
+STREAM5_RE = re.compile(
+    r"ECU Stream5 Frame1 id=(?P<can_id>[0-9A-Fa-f]+) "
+    r"rpm=(?P<rpm>-?\d+) "
+    r"tps=(?P<tps>-?\d+) "
+    r"aps=(?P<aps>-?\d+) "
+    r"lambda1=(?P<lambda1>-?\d+) "
+    r"raw=(?P<raw>[0-9A-F]+)"
+)
+
+STREAM6_RE = re.compile(
+    r"ECU Stream6 Frame1 id=(?P<can_id>[0-9A-Fa-f]+) "
+    r"oil_pressure=(?P<oil_pressure>-?\d+) "
+    r"fuel_pressure=(?P<fuel_pressure>-?\d+) "
+    r"map=(?P<map>-?\d+) "
+    r"raw=(?P<raw>[0-9A-F]+)"
+)
+
+STREAM7_RE = re.compile(
+    r"ECU Stream7 Frame1 id=(?P<can_id>[0-9A-Fa-f]+) "
+    r"ect=(?P<ect>-?\d+) "
+    r"oil_temp=(?P<oil_temp>-?\d+) "
+    r"raw=(?P<raw>[0-9A-F]+)"
+)
+
+HALOW_KV_RE = re.compile(r"([A-Za-z_]+)=([^\s]+)")
 
 @dataclass
 class Metric:
@@ -230,13 +263,18 @@ class DashboardState:
     oil_temp: Metric = field(default_factory=Metric)
     oil_pressure: Metric = field(default_factory=Metric)
     fuel_pressure: Metric = field(default_factory=Metric)
+    map: Metric = field(default_factory=Metric)
     lambda1: Metric = field(default_factory=Metric)
     tps: Metric = field(default_factory=Metric)
     aps: Metric = field(default_factory=Metric)
     gear: Metric = field(default_factory=Metric)
     wheel_speed: Metric = field(default_factory=Metric)
     throughput: Metric = field(default_factory=Metric)
+    halow_link_mbps: Metric = field(default_factory=Metric)
     neutral_park: Metric = field(default_factory=Metric)
+    halow_bw_mhz: float | None = None
+    halow_rssi: float | None = None
+    halow_mcs: str = "--"
     last_line: str = "Waiting for serial data..."
     last_update_monotonic: float = 0.0
     last_animation_monotonic: float = field(default_factory=time.monotonic)
@@ -254,15 +292,43 @@ class DashboardState:
             self.oil_temp,
             self.oil_pressure,
             self.fuel_pressure,
+            self.map,
             self.lambda1,
             self.tps,
             self.aps,
             self.gear,
             self.wheel_speed,
             self.throughput,
+            self.halow_link_mbps,
             self.neutral_park,
         ):
             metric.reset_bounds()
+
+    def clear_metrics(self):
+        for metric in (
+            self.rpm,
+            self.ect,
+            self.oil_temp,
+            self.oil_pressure,
+            self.fuel_pressure,
+            self.map,
+            self.lambda1,
+            self.tps,
+            self.aps,
+            self.gear,
+            self.wheel_speed,
+            self.throughput,
+            self.halow_link_mbps,
+            self.neutral_park,
+        ):
+            metric.value = None
+            metric.display_value = None
+            metric.velocity = 0.0
+            metric.minimum = None
+            metric.maximum = None
+        self.halow_bw_mhz = None
+        self.halow_rssi = None
+        self.halow_mcs = "--"
 
     def animate_metrics(self):
         now = time.monotonic()
@@ -274,12 +340,14 @@ class DashboardState:
             self.oil_temp,
             self.oil_pressure,
             self.fuel_pressure,
+            self.map,
             self.lambda1,
             self.tps,
             self.aps,
             self.gear,
             self.wheel_speed,
             self.throughput,
+            self.halow_link_mbps,
             self.neutral_park,
         ):
             metric.animate(dt)
@@ -320,7 +388,7 @@ class SerialWorker(threading.Thread):
 
         while not self._stop_event.is_set():
             try:
-                with serial.Serial(self.port, self.baudrate, timeout=0.5) as ser:
+                with serial.Serial(self.port, self.baudrate, timeout=0.1) as ser:
                     self._serial = ser
                     self.line_queue.put(f"INFO: connected to {self.port} @ {self.baudrate}")
                     while not self._stop_event.is_set():
@@ -334,7 +402,7 @@ class SerialWorker(threading.Thread):
                 if self._stop_event.is_set():
                     break
                 self.line_queue.put(f"ERROR: serial {self.port}: {exc}")
-                time.sleep(2.0)
+                time.sleep(0.5)
             finally:
                 self._serial = None
 
@@ -455,7 +523,16 @@ class GaugePanel(tk.Frame):
         self.canvas.bind("<Configure>", lambda _event: self._draw())
 
     def set_value(self, metric: Metric):
-        self.value = metric.rendered_value
+        rendered = metric.rendered_value
+        if rendered is not None:
+            try:
+                rendered = float(rendered)
+            except (TypeError, ValueError):
+                rendered = None
+            else:
+                if not math.isfinite(rendered):
+                    rendered = None
+        self.value = rendered
         self.minimum = metric.minimum
         self.maximum_seen = metric.maximum
         self._draw()
@@ -479,30 +556,30 @@ class GaugePanel(tk.Frame):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(10, min(17, int(scale * 0.072)))
-        value_size = max(18, min(40, int(scale * 0.17)))
-        unit_size = max(9, min(13, int(scale * 0.055)))
-        footer_size = max(8, min(12, int(scale * 0.041)))
-        top_pad = max(10, int(h * 0.05))
+        title_size = max(11, min(13, int(scale * 0.060)))
+        value_size = max(26, min(36, int(scale * 0.165)))
+        unit_size = max(10, min(12, int(scale * 0.048)))
+        footer_size = max(9, min(10, int(scale * 0.036)))
+        top_pad = max(12, int(h * 0.065))
         self.canvas.create_text(
             w / 2,
             top_pad,
             anchor="n",
             text=self.title,
-            width=w - 18,
+            width=w - 24,
             fill=MUTED,
             font=("Bahnschrift SemiBold", title_size),
             justify="center",
         )
 
         cx = w / 2
-        cy = h * 0.61
-        r = max(28, min(w * 0.40, h * 0.36))
+        cy = h * 0.60
+        r = max(40, min(w * 0.39, h * 0.35))
         bbox = (cx - r, cy - r, cx + r, cy + r)
         start = 150
         extent = 240
 
-        arc_width = max(6, int(scale * 0.065))
+        arc_width = max(6, int(scale * 0.055))
         marker_width = max(2, int(scale * 0.015))
         self.canvas.create_arc(bbox, start=start, extent=extent, style="arc", width=arc_width, outline=TRACK)
         self.canvas.create_arc(bbox, start=start, extent=extent * 0.72, style="arc", width=marker_width, outline="#C69A21")
@@ -510,29 +587,34 @@ class GaugePanel(tk.Frame):
         self.canvas.create_arc(bbox, start=start + extent * 0.92, extent=extent * 0.08, style="arc", width=marker_width, outline=DANGER)
 
         value = 0.0 if self.value is None else float(self.value)
+        if not math.isfinite(value):
+            value = 0.0
         progress = max(0.0, min(1.0, value / self.maximum)) if self.maximum else 0.0
+        if not math.isfinite(progress):
+            progress = 0.0
         color = ACCENT if progress < 0.72 else WARNING if progress < 0.92 else DANGER
-        self.canvas.create_arc(bbox, start=start, extent=extent * progress, style="arc", width=max(5, arc_width - 2), outline=color)
+        if progress > 0.0005:
+            self.canvas.create_arc(bbox, start=start, extent=extent * progress, style="arc", width=max(5, arc_width - 2), outline=color)
 
-        self.canvas.create_text(cx, cy - r * 0.01, text=self._fmt(self.value), width=max(60, int(r * 1.65)), fill=color, font=("Bahnschrift Bold", value_size), justify="center")
+        self.canvas.create_text(cx, cy - r * 0.01, text=self._fmt(self.value), width=max(80, int(r * 1.70)), fill=color, font=("Bahnschrift Bold", value_size), justify="center")
         if self.unit:
-            self.canvas.create_text(cx, cy + r * 0.31, text=self.unit, width=max(60, int(r * 1.50)), fill=MUTED, font=("Bahnschrift SemiBold", unit_size), justify="center")
+            self.canvas.create_text(cx, cy + r * 0.30, text=self.unit, width=max(80, int(r * 1.52)), fill=MUTED, font=("Bahnschrift SemiBold", unit_size), justify="center")
         self.canvas.create_text(
             12,
-            h - max(10, int(scale * 0.05)),
+            h - 12,
             anchor="sw",
             text=f"Min {self._fmt(self.minimum)}",
-            width=max(40, int(w * 0.42)),
+            width=max(64, int(w * 0.44)),
             fill="#8690A1",
             font=("Consolas", footer_size),
             justify="left",
         )
         self.canvas.create_text(
             w - 12,
-            h - max(10, int(scale * 0.05)),
+            h - 12,
             anchor="se",
             text=f"Max {self._fmt(self.maximum_seen)}",
-            width=max(40, int(w * 0.42)),
+            width=max(64, int(w * 0.44)),
             fill="#8690A1",
             font=("Consolas", footer_size),
             justify="right",
@@ -562,10 +644,10 @@ class StatPanel(tk.Frame):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(9, min(16, int(scale * 0.068)))
-        value_size = max(15, min(34, int(scale * 0.18)))
-        self.canvas.create_text(w / 2, 12, anchor="n", text=self.title, width=w - 20, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
-        self.canvas.create_text(w / 2, h / 2, text=self.value_text, fill=ACCENT, width=w - 28, font=("Bahnschrift Bold", value_size), justify="center")
+        title_size = max(11, min(13, int(scale * 0.060)))
+        value_size = max(28, min(36, int(scale * 0.170)))
+        self.canvas.create_text(w / 2, 12, anchor="n", text=self.title, width=w - 24, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
+        self.canvas.create_text(w / 2, h / 2, text=self.value_text, fill=ACCENT, width=w - 24, font=("Bahnschrift Bold", value_size), justify="center")
 
 
 class TrendPanel(tk.Frame):
@@ -587,13 +669,17 @@ class TrendPanel(tk.Frame):
         signature = []
         for item in series:
             points = item.get("points", [])
+            first_point = points[0] if points else None
+            last_point = points[-1] if points else None
+            mid_point = points[len(points) // 2] if points else None
             signature.append(
                 (
                     item.get("label"),
                     item.get("color"),
                     len(points),
-                    points[0][1] if points else None,
-                    points[-1][1] if points else None,
+                    first_point,
+                    mid_point,
+                    last_point,
                 )
             )
         return tuple(signature)
@@ -617,12 +703,12 @@ class TrendPanel(tk.Frame):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(8, min(13, int(scale * 0.042)))
-        legend_size = max(6, min(9, int(scale * 0.028)))
-        axis_size = max(6, min(9, int(scale * 0.028)))
-        self.canvas.create_text(w / 2, 12, anchor="n", text=self.title.title(), width=w - 20, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
+        title_size = max(11, min(12, int(scale * 0.040)))
+        legend_size = max(8, min(9, int(scale * 0.026)))
+        axis_size = max(8, min(9, int(scale * 0.025)))
+        self.canvas.create_text(w / 2, 12, anchor="n", text=self.title.title(), width=w - 24, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
 
-        left, top, right, bottom = 42, 34, w - 14, h - 34
+        left, top, right, bottom = 42, 34, w - 16, h - 34
         plot_w = max(40, right - left)
         plot_h = max(40, bottom - top)
 
@@ -639,8 +725,8 @@ class TrendPanel(tk.Frame):
         for item in self.series:
             all_values.extend(v for _, v in item["points"])
         if not all_values:
-            self.canvas.create_text(w / 2, h / 2 - 8, text="Waiting For Telemetry", fill=MUTED, font=("Bahnschrift SemiBold", max(11, title_size + 1)))
-            self.canvas.create_text(w / 2, h / 2 + 12, text="No samples in the current window", fill="#7F8898", font=("Bahnschrift", max(9, axis_size + 1)))
+            self.canvas.create_text(w / 2, h / 2 - 8, text="Waiting For Telemetry", fill=MUTED, font=("Bahnschrift SemiBold", max(11, title_size)))
+            self.canvas.create_text(w / 2, h / 2 + 12, text="No samples in the current window", fill="#7F8898", font=("Bahnschrift", max(9, axis_size)))
             return
 
         min_value = min(all_values)
@@ -654,23 +740,25 @@ class TrendPanel(tk.Frame):
             label_value = min_value + ((max_value - min_value) * fraction)
             self.canvas.create_text(left - 8, y, anchor="e", text=f"{label_value:.1f}", fill=MUTED, font=("Consolas", axis_size))
 
-        max_len = max(len(item["points"]) for item in self.series)
-        max_len = max(2, max_len)
+        max_time = 0.0
+        for item in self.series:
+            if item["points"]:
+                max_time = max(max_time, item["points"][-1][0])
+        max_time = max(1e-6, max_time)
 
         for item in self.series:
             points = self._downsample_points(item["points"], max(60, int(plot_w / 2.5)))
             if len(points) < 2:
                 continue
             coords = []
-            start_index = max_len - len(points)
-            for index, (_, value) in enumerate(points):
-                x = left + plot_w * ((start_index + index) / (max_len - 1))
+            for sample_time, value in points:
+                x = left + plot_w * (max(0.0, min(max_time, sample_time)) / max_time)
                 y = bottom - plot_h * ((value - min_value) / (max_value - min_value))
                 coords.extend((x, y))
             self.canvas.create_line(
                 *coords,
                 fill=item["color"],
-                width=max(2, int(scale * 0.008)),
+                width=max(2, int(scale * 0.007)),
                 smooth=True,
                 splinesteps=20,
                 capstyle=tk.ROUND,
@@ -681,7 +769,7 @@ class TrendPanel(tk.Frame):
         for item in self.series:
             self.canvas.create_rectangle(legend_x, h - 16, legend_x + 10, h - 6, fill=item["color"], outline=item["color"])
             self.canvas.create_text(legend_x + 16, h - 11, anchor="w", text=item["label"], fill=MUTED, font=("Consolas", legend_size))
-            legend_x += max(72, min(120, int(w * 0.17)))
+            legend_x += max(84, min(126, int(w * 0.18)))
 
 
 class CustomTrendPanel(TrendPanel):
@@ -724,9 +812,9 @@ class CustomTrendPanel(TrendPanel):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(8, min(13, int(scale * 0.042)))
-        legend_size = max(6, min(9, int(scale * 0.028)))
-        axis_size = max(6, min(9, int(scale * 0.027)))
+        title_size = max(11, min(12, int(scale * 0.040)))
+        legend_size = max(8, min(9, int(scale * 0.026)))
+        axis_size = max(8, min(9, int(scale * 0.024)))
         self.canvas.create_text(
             w / 2,
             10,
@@ -757,8 +845,8 @@ class CustomTrendPanel(TrendPanel):
 
         left_axis_count = (len(self.series) + 1) // 2
         right_axis_count = len(self.series) // 2
-        outer_margin = 14
-        axis_lane = 68
+        outer_margin = 16
+        axis_lane = 72
         axis_clearance = 12
         left = outer_margin + left_axis_count * axis_lane
         right = w - outer_margin - right_axis_count * axis_lane
@@ -773,7 +861,11 @@ class CustomTrendPanel(TrendPanel):
             x = left + (plot_w * i / 6.0)
             self.canvas.create_line(x, top, x, bottom, fill=GRID, width=1)
 
-        max_len = max(max(len(item["points"]), 2) for item in self.series)
+        max_time = 0.0
+        for item in self.series:
+            if item["points"]:
+                max_time = max(max_time, item["points"][-1][0])
+        max_time = max(1e-6, max_time)
 
         for idx, item in enumerate(self.series):
             points = item["points"]
@@ -820,15 +912,14 @@ class CustomTrendPanel(TrendPanel):
             points = self._downsample_points(points, max(60, int(plot_w / 2.5)))
 
             coords = []
-            start_index = max_len - len(points)
-            for point_index, (_, value) in enumerate(points):
-                x = left + plot_w * ((start_index + point_index) / (max_len - 1))
+            for sample_time, value in points:
+                x = left + plot_w * (max(0.0, min(max_time, sample_time)) / max_time)
                 y = bottom - plot_h * ((value - axis_min) / (axis_max - axis_min))
                 coords.extend((x, y))
             self.canvas.create_line(
                 *coords,
                 fill=item["color"],
-                width=max(2, int(scale * 0.008)),
+                width=max(2, int(scale * 0.007)),
                 smooth=True,
                 splinesteps=20,
                 capstyle=tk.ROUND,
@@ -839,7 +930,7 @@ class CustomTrendPanel(TrendPanel):
         for item in self.series:
             self.canvas.create_rectangle(legend_x, h - 16, legend_x + 10, h - 6, fill=item["color"], outline=item["color"])
             self.canvas.create_text(legend_x + 16, h - 11, anchor="w", text=item["label"], fill=MUTED, font=("Consolas", legend_size))
-            legend_x += max(88, min(150, int(w * 0.20)))
+            legend_x += max(96, min(156, int(w * 0.21)))
 
 
 class TachPanel(tk.Frame):
@@ -873,16 +964,16 @@ class TachPanel(tk.Frame):
         self._last_draw_key = draw_key
         self.canvas.delete("all")
         scale = min(w, h)
-        title_size = max(9, min(16, int(scale * 0.064)))
-        value_size = max(14, min(36, int(scale * 0.158)))
-        top_pad = max(6, int(h * 0.02))
+        title_size = max(13, min(16, int(scale * 0.048)))
+        value_size = max(28, min(40, int(scale * 0.135)))
+        top_pad = max(8, int(h * 0.02))
         self.canvas.create_text(w / 2, top_pad + 2, anchor="n", text=self.title, width=w - 24, fill=MUTED, font=("Bahnschrift SemiBold", title_size), justify="center")
 
         cx = w / 2
-        cy = h * 0.59
-        r = max(36, min(w * 0.43, h * 0.42))
+        cy = h * 0.58
+        r = max(54, min(w * 0.435, h * 0.44))
         bbox = (cx - r, cy - r, cx + r, cy + r)
-        arc_width = max(6, int(scale * 0.065))
+        arc_width = max(6, int(scale * 0.055))
         start_deg = 210
         sweep_deg = -240
 
@@ -898,7 +989,7 @@ class TachPanel(tk.Frame):
         inner_major = r - max(18, int(scale * 0.10))
         inner_minor = r - max(12, int(scale * 0.07))
         outer_tick = r - max(3, int(scale * 0.02))
-        label_radius = r - max(34, int(scale * 0.18))
+        label_radius = r - max(34, int(scale * 0.16))
 
         for tick in range(major_ticks * minor_per_major + 1):
             fraction = tick / (major_ticks * minor_per_major)
@@ -930,7 +1021,7 @@ class TachPanel(tk.Frame):
                     ly,
                     text=str(label_value),
                     fill=MUTED,
-                    font=("Bahnschrift SemiBold", max(7, int(scale * 0.038))),
+                    font=("Bahnschrift SemiBold", max(8, int(scale * 0.034))),
                 )
 
         needle_angle_deg = start_deg + sweep_deg * progress
@@ -962,11 +1053,11 @@ class TachPanel(tk.Frame):
         )
 
         if self.logo_image is not None:
-            self.canvas.create_image(cx, cy + max(18, int(scale * 0.08)), image=self.logo_image)
+            self.canvas.create_image(cx, cy + max(18, int(scale * 0.075)), image=self.logo_image)
 
         self.canvas.create_text(
             cx,
-            h * 0.79,
+            h * 0.77,
             text=f"{int(round(rpm)) if self.rpm_value is not None else '--'}",
             width=w - 20,
             fill=TEXT,
@@ -975,7 +1066,7 @@ class TachPanel(tk.Frame):
         )
         self.canvas.create_text(
             cx,
-            h * 0.90,
+            h * 0.885,
             text="x1000 rpm",
             width=w - 20,
             fill=MUTED,
@@ -1052,12 +1143,13 @@ class DashboardApp:
             "oil_temp": {"label": "Oil Temp", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
             "oil_pressure": {"label": "Oil Pressure", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
             "fuel_pressure": {"label": "Fuel Pressure", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "map": {"label": "MAP", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
             "lambda1": {"label": "Lambda", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
             "tps": {"label": "TPS", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
             "aps": {"label": "APS", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
             "gear": {"label": "Gear", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
             "wheel_speed": {"label": "Wheel Speed", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
-            "throughput": {"label": "Throughput", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
+            "throughput": {"label": "Payload Rate", "warn_low": "", "warn_high": "", "crit_low": "", "crit_high": ""},
         }
         self._persisted_tabs_payload = None
         self._persisted_current_tab_index = 0
@@ -1079,6 +1171,7 @@ class DashboardApp:
             "ect": [],
             "oil_pressure": [],
             "fuel_pressure": [],
+            "map": [],
             "wheel_speed": [],
             "gear": [],
             "lambda1": [],
@@ -1100,9 +1193,22 @@ class DashboardApp:
         header.pack(fill="x", pady=(0, GAP_SM))
         self._load_logo_image()
 
+        self.halow_pill = tk.Label(
+            header,
+            text="HALOW -- Mbps",
+            bg=CARD_BG,
+            fg=MUTED,
+            font=("Bahnschrift", 9),
+            padx=10,
+            pady=8,
+            highlightthickness=1,
+            highlightbackground=CARD_BORDER,
+        )
+        self.halow_pill.pack(side="right")
+
         self.throughput_pill = tk.Label(
             header,
-            text="-- kbps",
+            text="PAYLOAD -- kbps",
             bg=CARD_BG,
             fg=ACCENT,
             font=("Bahnschrift", 9),
@@ -1111,7 +1217,7 @@ class DashboardApp:
             highlightthickness=1,
             highlightbackground=CARD_BORDER,
         )
-        self.throughput_pill.pack(side="right")
+        self.throughput_pill.pack(side="right", padx=(0, 8))
 
         header_strip = tk.Frame(header, bg=CARD_BG, highlightthickness=1, highlightbackground=CARD_BORDER, height=34)
         header_strip.pack(side="left", fill="x", expand=True, anchor="w", padx=(0, 8))
@@ -1470,7 +1576,8 @@ class DashboardApp:
         self.oil_temp_gauge = GaugePanel(self.dashboard, "Oil Temp", "C", maximum=140)
         self.coolant_gauge = GaugePanel(self.dashboard, "Coolant Temp", "C", maximum=130)
 
-        self.lambda_gauge = GaugePanel(self.dashboard, "Lambda", "ratio", maximum=2.0, decimals=2)
+        self.lambda_gauge = GaugePanel(self.dashboard, "Lambda", "raw", maximum=20.0, decimals=1)
+        self.map_gauge = GaugePanel(self.dashboard, "MAP", "raw", maximum=200)
         self.fuel_pressure_gauge = GaugePanel(self.dashboard, "Fuel Pressure", "raw", maximum=200)
         self.oil_pressure_gauge = GaugePanel(self.dashboard, "Oil Pressure", "raw", maximum=200)
 
@@ -1481,10 +1588,11 @@ class DashboardApp:
         self.gear_trend = TrendPanel(self.dashboard, "Gear Graph")
         self.oil_temp_trend_single = TrendPanel(self.dashboard, "Oil Temp Graph")
         self.coolant_trend = TrendPanel(self.dashboard, "Coolant Graph")
-        self.throughput_trend = TrendPanel(self.dashboard, "Throughput Graph")
+        self.throughput_trend = TrendPanel(self.dashboard, "Payload Rate Graph")
         self.lambda_trend = TrendPanel(self.dashboard, "Lambda Graph")
         self.fuel_pressure_trend_single = TrendPanel(self.dashboard, "Fuel Pressure Graph")
         self.oil_pressure_trend_single = TrendPanel(self.dashboard, "Oil Pressure Graph")
+        self.map_trend = TrendPanel(self.dashboard, "MAP Graph")
         self.throttle_trend = TrendPanel(self.dashboard, "Throttle Graph")
         self.temp_trend = TrendPanel(self.dashboard, "Temp Graph")
         self.pressure_trend = TrendPanel(self.dashboard, "Pressure Graph")
@@ -1503,6 +1611,7 @@ class DashboardApp:
         self._register_panel("oil_temp_gauge", self.oil_temp_gauge)
         self._register_panel("coolant_gauge", self.coolant_gauge)
         self._register_panel("lambda_gauge", self.lambda_gauge)
+        self._register_panel("map_gauge", self.map_gauge)
         self._register_panel("fuel_pressure_gauge", self.fuel_pressure_gauge)
         self._register_panel("oil_pressure_gauge", self.oil_pressure_gauge)
         self._register_panel("rpm_trend", self.rpm_trend)
@@ -1516,6 +1625,7 @@ class DashboardApp:
         self._register_panel("lambda_trend", self.lambda_trend)
         self._register_panel("fuel_pressure_trend_single", self.fuel_pressure_trend_single)
         self._register_panel("oil_pressure_trend_single", self.oil_pressure_trend_single)
+        self._register_panel("map_trend", self.map_trend)
         self._register_panel("throttle_trend", self.throttle_trend)
         self._register_panel("temp_trend", self.temp_trend)
         self._register_panel("pressure_trend", self.pressure_trend)
@@ -1719,6 +1829,15 @@ class DashboardApp:
             layout[panel_name] = spec
         return layout
 
+    def _apply_core_tab_layout_migrations(self, tab_name: str, raw_layout_payload, layout: dict):
+        if not isinstance(layout, dict):
+            return layout
+        payload = raw_layout_payload if isinstance(raw_layout_payload, dict) else {}
+        if tab_name.upper() == "LIVE" and "map_gauge" not in payload and "map_gauge" in DEFAULT_PANEL_LAYOUTS:
+            layout["map_gauge"] = DEFAULT_PANEL_LAYOUTS["map_gauge"].copy()
+            layout["map_gauge"]["visible"] = True
+        return layout
+
     def _sanitize_custom_graphs_payload(self, payload):
         cleaned = self._default_custom_graph_config()
         if not isinstance(payload, dict):
@@ -1759,9 +1878,11 @@ class DashboardApp:
                 continue
             name = str(tab_payload.get("name", f"TAB{index}")).strip() or f"TAB{index}"
             tab_id = f"tab_{index}"
+            layout = self._sanitize_layout_payload(tab_payload.get("layout"))
+            layout = self._apply_core_tab_layout_migrations(name, tab_payload.get("layout"), layout)
             self.tabs[tab_id] = {
                 "name": name,
-                "layout": self._sanitize_layout_payload(tab_payload.get("layout")),
+                "layout": layout,
                 "custom_graphs": self._sanitize_custom_graphs_payload(tab_payload.get("custom_graphs")),
                 "custom_graph_titles": self._sanitize_custom_graph_titles_payload(tab_payload.get("custom_graph_titles")),
             }
@@ -2111,9 +2232,9 @@ class DashboardApp:
                 layout[name] = DEFAULT_PANEL_LAYOUTS[name].copy()
             else:
                 if PANEL_DEFS[name]["section"] == "graphs":
-                    layout[name] = {"x": 0.04, "y": 0.06 + (index % 4) * 0.06, "w": 0.44, "h": 0.22, "visible": False}
+                    layout[name] = {"x": 0.04, "y": 0.06 + (index % 4) * 0.06, "w": 0.46, "h": 0.24, "visible": False}
                 else:
-                    layout[name] = {"x": 0.06 + (index % 4) * 0.08, "y": 0.06 + (index % 4) * 0.05, "w": 0.18, "h": 0.18, "visible": False}
+                    layout[name] = {"x": 0.06 + (index % 4) * 0.08, "y": 0.06 + (index % 4) * 0.05, "w": 0.22, "h": 0.20, "visible": False}
         return layout
 
     def _blank_layout_copy(self):
@@ -2132,6 +2253,7 @@ class DashboardApp:
             "oil_temp_gauge",
             "coolant_gauge",
             "lambda_gauge",
+            "map_gauge",
             "fuel_pressure_gauge",
             "oil_pressure_gauge",
             "rpm_tach",
@@ -2150,7 +2272,7 @@ class DashboardApp:
         )
         columns = 2
         cell_w = 0.46
-        cell_h = 0.40
+        cell_h = 0.42
         x_gap = 0.04
         y_gap = 0.06
         x_positions = [0.02, 0.02 + cell_w + x_gap]
@@ -2726,6 +2848,36 @@ class DashboardApp:
                 {"name": "Fuel Pressure", "start": "24", "width": "16", "byte_order": "MS First", "type": "Unsigned", "multiply": "4", "divider": "1", "offset": "0"},
             ],
         }
+        streams["Stream 5"]["Frame 1"] = {
+            "frame_size": "8",
+            "id_position": "0",
+            "id_decimal": "0",
+            "parameters": [
+                {"name": "Engine Speed", "start": "8", "width": "16", "byte_order": "MS First", "type": "Unsigned", "multiply": "1", "divider": "1", "offset": "0"},
+                {"name": "TPS (Main)", "start": "24", "width": "8", "byte_order": "MS First", "type": "Unsigned", "multiply": "1", "divider": "1", "offset": "0"},
+                {"name": "APS (Main)", "start": "32", "width": "8", "byte_order": "MS First", "type": "Unsigned", "multiply": "1", "divider": "1", "offset": "0"},
+                {"name": "Lambda 1", "start": "40", "width": "8", "byte_order": "MS First", "type": "Unsigned", "multiply": "10", "divider": "1", "offset": "0"},
+            ],
+        }
+        streams["Stream 6"]["Frame 1"] = {
+            "frame_size": "8",
+            "id_position": "0",
+            "id_decimal": "0",
+            "parameters": [
+                {"name": "Oil Pressure", "start": "8", "width": "16", "byte_order": "MS First", "type": "Unsigned", "multiply": "1", "divider": "1", "offset": "0"},
+                {"name": "Fuel Pressure", "start": "24", "width": "16", "byte_order": "MS First", "type": "Unsigned", "multiply": "1", "divider": "1", "offset": "0"},
+                {"name": "MAP", "start": "40", "width": "16", "byte_order": "MS First", "type": "Unsigned", "multiply": "1", "divider": "1", "offset": "0"},
+            ],
+        }
+        streams["Stream 7"]["Frame 1"] = {
+            "frame_size": "8",
+            "id_position": "0",
+            "id_decimal": "0",
+            "parameters": [
+                {"name": "ECT", "start": "32", "width": "8", "byte_order": "MS First", "type": "Unsigned", "multiply": "1", "divider": "1", "offset": "0"},
+                {"name": "Oil Temperature", "start": "40", "width": "8", "byte_order": "MS First", "type": "Unsigned", "multiply": "1", "divider": "1", "offset": "0"},
+            ],
+        }
         return {
             "connection": {
                 "serial_port": "COM12",
@@ -2769,7 +2921,7 @@ class DashboardApp:
                 "latching": False,
             },
             "mode": {
-                "can_module": "CAN 2",
+                "can_module": "CAN 1",
                 "mode": "User Defined",
                 "bit_rate": "1 Mbit/s",
                 "obd": "OFF",
@@ -2778,9 +2930,9 @@ class DashboardApp:
                     {"name": "2: Transmit User Stream 2", "mode": "Transmit User Stream 2", "can_id": "1000", "rate": "20 Hz", "format": "Normal"},
                     {"name": "3: OFF", "mode": "OFF", "can_id": "", "rate": "", "format": "Normal"},
                     {"name": "4: OFF", "mode": "OFF", "can_id": "", "rate": "", "format": "Normal"},
-                    {"name": "5: OFF", "mode": "OFF", "can_id": "", "rate": "", "format": "Normal"},
-                    {"name": "6: OFF", "mode": "OFF", "can_id": "", "rate": "", "format": "Normal"},
-                    {"name": "7: OFF", "mode": "OFF", "can_id": "", "rate": "", "format": "Normal"},
+                    {"name": "5: Transmit User Stream 5", "mode": "Transmit User Stream 5", "can_id": "1001", "rate": "100 Hz", "format": "Normal"},
+                    {"name": "6: Transmit User Stream 6", "mode": "Transmit User Stream 6", "can_id": "1002", "rate": "50 Hz", "format": "Normal"},
+                    {"name": "7: Transmit User Stream 7", "mode": "Transmit User Stream 7", "can_id": "1003", "rate": "10 Hz", "format": "Normal"},
                     {"name": "8: OFF", "mode": "OFF", "can_id": "", "rate": "", "format": "Normal"},
                     {"name": "9: OFF", "mode": "OFF", "can_id": "", "rate": "", "format": "Normal"},
                     {"name": "10: OFF", "mode": "OFF", "can_id": "", "rate": "", "format": "Normal"},
@@ -2932,6 +3084,46 @@ class DashboardApp:
         except Exception:
             pass
 
+    def _logging_metric_aliases(self):
+        return {
+            "rpm": "rpm",
+            "engine speed": "rpm",
+            "engine_speed": "rpm",
+            "engine rpm": "rpm",
+            "tps": "tps",
+            "tps_main": "tps",
+            "throttle pos": "tps",
+            "aps": "aps",
+            "aps_main": "aps",
+            "accel pedal pos": "aps",
+            "lambda": "lambda1",
+            "lambda1": "lambda1",
+            "lambda 1": "lambda1",
+            "coolant": "ect",
+            "coolant temp": "ect",
+            "coolant_temp": "ect",
+            "engine temp": "ect",
+            "ect": "ect",
+            "oil temp": "oil_temp",
+            "oil_temp": "oil_temp",
+            "eng oil temp": "oil_temp",
+            "oil pressure": "oil_pressure",
+            "oil_pressure": "oil_pressure",
+            "eng oil pres": "oil_pressure",
+            "fuel pressure": "fuel_pressure",
+            "fuel_pressure": "fuel_pressure",
+            "fuel pres": "fuel_pressure",
+            "gear": "gear",
+            "wheel speed": "wheel_speed",
+            "wheel_speed": "wheel_speed",
+            "throughput": "throughput",
+            "payload": "throughput",
+            "payload rate": "throughput",
+            "neutral_park": "neutral_park",
+            "neutral/park": "neutral_park",
+            "neutral park": "neutral_park",
+        }
+
     def _resolve_log_path(self, log_format: str):
         logging_model = self.settings_model["logging"]
         raw_path = str(logging_model.get("file_path", "")).strip()
@@ -2979,34 +3171,7 @@ class DashboardApp:
 
     def _selected_logging_metrics(self):
         raw_metrics = self.settings_model["logging"].get("metrics", "")
-        aliases = {
-            "rpm": "rpm",
-            "engine speed": "rpm",
-            "engine_speed": "rpm",
-            "tps": "tps",
-            "tps_main": "tps",
-            "aps": "aps",
-            "aps_main": "aps",
-            "lambda": "lambda1",
-            "lambda1": "lambda1",
-            "lambda 1": "lambda1",
-            "coolant": "ect",
-            "coolant temp": "ect",
-            "coolant_temp": "ect",
-            "ect": "ect",
-            "oil temp": "oil_temp",
-            "oil_temp": "oil_temp",
-            "oil pressure": "oil_pressure",
-            "oil_pressure": "oil_pressure",
-            "fuel pressure": "fuel_pressure",
-            "fuel_pressure": "fuel_pressure",
-            "gear": "gear",
-            "wheel speed": "wheel_speed",
-            "wheel_speed": "wheel_speed",
-            "throughput": "throughput",
-            "neutral_park": "neutral_park",
-            "neutral/park": "neutral_park",
-        }
+        aliases = self._logging_metric_aliases()
         selected = []
         seen = set()
         for token in str(raw_metrics).split(","):
@@ -3051,7 +3216,7 @@ class DashboardApp:
             "aps": {"channel": "Accel Pedal Pos", "unit": "%", "decimals": 1},
             "gear": {"channel": "Gear", "unit": "none", "decimals": 0},
             "wheel_speed": {"channel": "Wheel Speed", "unit": "raw", "decimals": 0},
-            "throughput": {"channel": "Throughput", "unit": "kbps", "decimals": 1},
+            "throughput": {"channel": "Payload Rate", "unit": "kbps", "decimals": 1},
             "neutral_park": {"channel": "Neutral Park", "unit": "none", "decimals": 0},
         }
         return specs.get(metric_name, {"channel": metric_name, "unit": "none", "decimals": 3})
@@ -3249,8 +3414,8 @@ class DashboardApp:
         dialog.title("Settings")
         dialog.configure(bg=BACKGROUND)
         dialog.transient(self.root)
-        dialog.geometry("1080x700")
-        dialog.minsize(980, 620)
+        dialog.geometry("1100x720")
+        dialog.minsize(1000, 640)
         dialog.protocol("WM_DELETE_WINDOW", dialog.withdraw)
         dialog.grid_rowconfigure(0, weight=1)
         dialog.grid_columnconfigure(0, weight=1)
@@ -3294,11 +3459,11 @@ class DashboardApp:
         dialog.option_add("*LabelFrame.highlightBackground", CARD_BORDER)
 
         style.configure("Pclink.TNotebook", background=BACKGROUND, borderwidth=0)
-        style.configure("Pclink.TNotebook.Tab", background=CARD_BG, foreground=TEXT, padding=(10, 6), font=("Bahnschrift SemiBold", 10), borderwidth=0)
+        style.configure("Pclink.TNotebook.Tab", background=CARD_BG, foreground=TEXT, padding=(12, 7), font=("Bahnschrift SemiBold", 11), borderwidth=0)
         style.map("Pclink.TNotebook.Tab", background=[("selected", ACCENT_2), ("active", CARD_BORDER)], foreground=[("selected", TEXT), ("active", TEXT)])
-        style.configure("Pclink.Treeview", background=BACKGROUND, fieldbackground=BACKGROUND, foreground=TEXT, rowheight=22, font=("Consolas", 10), borderwidth=1, relief="flat", bordercolor=CARD_BORDER, lightcolor=CARD_BORDER, darkcolor=CARD_BORDER)
+        style.configure("Pclink.Treeview", background=BACKGROUND, fieldbackground=BACKGROUND, foreground=TEXT, rowheight=24, font=("Consolas", 10), borderwidth=1, relief="flat", bordercolor=CARD_BORDER, lightcolor=CARD_BORDER, darkcolor=CARD_BORDER)
         style.map("Pclink.Treeview", background=[("selected", ACCENT_2)], foreground=[("selected", TEXT)])
-        style.configure("Pclink.Treeview.Heading", background=CARD_BG, foreground=ACCENT, font=("Bahnschrift SemiBold", 10), borderwidth=1, relief="flat", bordercolor=CARD_BORDER, lightcolor=CARD_BORDER, darkcolor=CARD_BORDER)
+        style.configure("Pclink.Treeview.Heading", background=CARD_BG, foreground=ACCENT, font=("Bahnschrift SemiBold", 11), borderwidth=1, relief="flat", bordercolor=CARD_BORDER, lightcolor=CARD_BORDER, darkcolor=CARD_BORDER)
         style.map("Pclink.Treeview.Heading", background=[("active", CARD_BORDER)])
         style.configure("Pclink.TCombobox", fieldbackground=BACKGROUND, background=CARD_BG, foreground=TEXT, borderwidth=1, relief="flat", padding=1, arrowcolor=ACCENT, bordercolor=CARD_BORDER, lightcolor=CARD_BORDER, darkcolor=CARD_BORDER)
         style.map("Pclink.TCombobox", fieldbackground=[("readonly", BACKGROUND)], background=[("readonly", CARD_BG)], foreground=[("readonly", TEXT)])
@@ -3374,7 +3539,22 @@ class DashboardApp:
 
         tk.Label(mode_data, text="Mode", bg=CARD_BG, fg=TEXT).grid(row=0, column=1, sticky="w")
         channel_mode_var = tk.StringVar()
-        channel_mode_combo = ttk.Combobox(mode_data, style="Pclink.TCombobox", values=["OFF", "Link Razor PDM", "Transmit User Stream 2", "Receive User Stream 3", "Receive User Stream 4"], textvariable=channel_mode_var, width=22)
+        channel_mode_combo = ttk.Combobox(
+            mode_data,
+            style="Pclink.TCombobox",
+            values=[
+                "OFF",
+                "Link Razor PDM",
+                "Transmit User Stream 2",
+                "Transmit User Stream 5",
+                "Transmit User Stream 6",
+                "Transmit User Stream 7",
+                "Receive User Stream 3",
+                "Receive User Stream 4",
+            ],
+            textvariable=channel_mode_var,
+            width=22,
+        )
         channel_mode_combo.grid(row=0, column=2, sticky="w", padx=(8, 24))
 
         tk.Label(mode_data, text="CAN ID", bg=CARD_BG, fg=TEXT).grid(row=0, column=3, sticky="w")
@@ -4075,6 +4255,9 @@ class DashboardApp:
     def _remove_tab(self, tab_id: str):
         if tab_id not in self.tabs or len(self.tab_order) <= 1:
             return
+        tab_name = self.tabs.get(tab_id, {}).get("name", "").upper()
+        if tab_name in CORE_TAB_NAMES:
+            return
         self._push_undo_state()
         remove_index = self.tab_order.index(tab_id)
         self.tab_order.remove(tab_id)
@@ -4091,7 +4274,7 @@ class DashboardApp:
         self._select_tab(tab_id)
         menu = tk.Menu(self.root, tearoff=0, bg=CARD_BG, fg=TEXT, activebackground=CARD_BORDER, activeforeground=TEXT)
         menu.add_command(label="Rename Tab", command=lambda t=tab_id: self._start_tab_rename(t))
-        if len(self.tab_order) > 1:
+        if len(self.tab_order) > 1 and self.tabs.get(tab_id, {}).get("name", "").upper() not in CORE_TAB_NAMES:
             menu.add_command(label="Remove Tab", command=lambda t=tab_id: self._remove_tab(t))
         else:
             menu.add_command(label="Remove Tab", state="disabled")
@@ -4138,6 +4321,7 @@ class DashboardApp:
         gear = random.randint(2, 5)
         wheel_speed = max(0, int((rpm / 120.0) + random.randint(-2, 2)))
         fuel_pressure = random.randint(40, 68)
+        map_value = random.randint(85, 110)
 
         self._apply_demo_values(
             rpm=rpm,
@@ -4151,6 +4335,7 @@ class DashboardApp:
             gear=gear,
             wheel_speed=wheel_speed,
             fuel_pressure=fuel_pressure,
+            map_value=map_value,
         )
         self.demo_after_id = self.root.after(90, self._queue_demo_line)
 
@@ -4168,6 +4353,7 @@ class DashboardApp:
         gear: int,
         wheel_speed: int,
         fuel_pressure: int,
+        map_value: int,
     ):
         self.state.touch("DEMO")
         self.state.rpm.update(rpm)
@@ -4181,6 +4367,7 @@ class DashboardApp:
         self.state.gear.update(gear)
         self.state.wheel_speed.update(wheel_speed)
         self.state.fuel_pressure.update(fuel_pressure)
+        self.state.map.update(map_value)
         throughput = max(120.0, min(2200.0, rpm / 6.5 + wheel_speed * 1.2))
         self.state.throughput.update(throughput)
         self._record_history("rpm", rpm)
@@ -4193,6 +4380,7 @@ class DashboardApp:
         self._record_history("gear", gear)
         self._record_history("wheel_speed", wheel_speed)
         self._record_history("fuel_pressure", fuel_pressure)
+        self._record_history("map", map_value)
         self._record_history("throughput", throughput)
 
     def _on_editor_content_configure(self, _event=None):
@@ -4214,7 +4402,8 @@ class DashboardApp:
                 break
             if self.demo_running:
                 continue
-            self._apply_line(line)
+            for chunk in self._split_serial_chunks(line):
+                self._apply_line(chunk)
         self.root.after(20, self._poll_lines)
 
     def _record_history(self, name: str, value):
@@ -4236,6 +4425,43 @@ class DashboardApp:
             self._rx_window_start = now
             self._rx_window_bytes = 0
 
+    @staticmethod
+    def _parse_halow_float(raw_value):
+        if raw_value is None:
+            return None
+        try:
+            return float(str(raw_value).rstrip(","))
+        except (TypeError, ValueError):
+            return None
+
+    def _apply_halow_line(self, line: str) -> bool:
+        if not (line.startswith("HALOW ") or line.startswith("HALOW:")):
+            return False
+        pairs = {key.lower(): value for key, value in HALOW_KV_RE.findall(line)}
+        if not pairs:
+            return True
+        link_value = None
+        for key in ("link_mbps", "air_link_mbps", "link_rate_mbps", "mbps"):
+            link_value = self._parse_halow_float(pairs.get(key))
+            if link_value is not None:
+                break
+        if link_value is not None:
+            self.state.halow_link_mbps.update(link_value)
+        bw_value = None
+        for key in ("bw_mhz", "bandwidth_mhz", "channel_mhz"):
+            bw_value = self._parse_halow_float(pairs.get(key))
+            if bw_value is not None:
+                break
+        if bw_value is not None:
+            self.state.halow_bw_mhz = bw_value
+        rssi_value = self._parse_halow_float(pairs.get("rssi"))
+        if rssi_value is not None:
+            self.state.halow_rssi = rssi_value
+        mcs_value = pairs.get("mcs")
+        if mcs_value:
+            self.state.halow_mcs = mcs_value.rstrip(",")
+        return True
+
     def _apply_line(self, line: str):
         line = self._normalize_line(line)
 
@@ -4252,6 +4478,12 @@ class DashboardApp:
             return
 
         self.state.touch(line)
+        if self.serial_worker is not None and self.connection_state != "connected":
+            self.connection_state = "connected"
+            self._last_serial_error = ""
+            self._update_connection_controls()
+        if self._apply_halow_line(line):
+            return
         self._record_rx_throughput(line)
 
         match = FRAME1_RE.fullmatch(line)
@@ -4300,6 +4532,45 @@ class DashboardApp:
             self._record_history("fuel_pressure", fuel_pressure)
             return
 
+        match = STREAM5_RE.fullmatch(line)
+        if match:
+            rpm = int(match.group("rpm"))
+            tps = int(match.group("tps"))
+            aps = int(match.group("aps"))
+            lambda_value = int(match.group("lambda1"))
+            self.state.rpm.update(rpm)
+            self.state.tps.update(tps)
+            self.state.aps.update(aps)
+            self.state.lambda1.update(lambda_value)
+            self._record_history("rpm", rpm)
+            self._record_history("tps", tps)
+            self._record_history("aps", aps)
+            self._record_history("lambda1", lambda_value)
+            return
+
+        match = STREAM6_RE.fullmatch(line)
+        if match:
+            oil_pressure = int(match.group("oil_pressure"))
+            fuel_pressure = int(match.group("fuel_pressure"))
+            map_value = int(match.group("map"))
+            self.state.oil_pressure.update(oil_pressure)
+            self.state.fuel_pressure.update(fuel_pressure)
+            self.state.map.update(map_value)
+            self._record_history("oil_pressure", oil_pressure)
+            self._record_history("fuel_pressure", fuel_pressure)
+            self._record_history("map", map_value)
+            return
+
+        match = STREAM7_RE.fullmatch(line)
+        if match:
+            ect = int(match.group("ect"))
+            oil_temp = int(match.group("oil_temp"))
+            self.state.ect.update(ect)
+            self.state.oil_temp.update(oil_temp)
+            self._record_history("ect", ect)
+            self._record_history("oil_temp", oil_temp)
+            return
+
     @staticmethod
     def _normalize_line(line: str) -> str:
         prefixes = ("AP: ", "STA: ", "UART OUT: ", "UART->STA: ")
@@ -4311,6 +4582,34 @@ class DashboardApp:
                     line = line[len(prefix):]
                     changed = True
         return line.strip()
+
+    @staticmethod
+    def _split_serial_chunks(line: str):
+        if not line:
+            return []
+        text = str(line).replace("\r", "\n")
+        split_tokens = (
+            "AP: ",
+            "STA: ",
+            "UART OUT: ",
+            "UART->STA: ",
+            "ECU Stream",
+            "ECU Frame",
+            "PDM,id=",
+            "HALOW ",
+            "HALOW:",
+            "INFO: connected to ",
+            "ERROR: serial ",
+        )
+        for token in split_tokens:
+            text = text.replace(token, f"\n{token}")
+        chunks = []
+        for chunk in text.splitlines():
+            chunk = chunk.strip()
+            if not chunk:
+                continue
+            chunks.append(chunk)
+        return chunks
 
     def _default_graph_window(self) -> float:
         try:
@@ -4324,8 +4623,8 @@ class DashboardApp:
             return []
         points = series
         if window_s is not None and window_s > 0:
-            cutoff = series[-1][0] - window_s
-            points = [point for point in series if point[0] >= cutoff]
+            cutoff = points[-1][0] - window_s
+            points = [point for point in points if point[0] >= cutoff]
             if not points:
                 points = [series[-1]]
         start = points[0][0]
@@ -4344,9 +4643,10 @@ class DashboardApp:
             "lambda_trend": ["lambda1"],
             "fuel_pressure_trend_single": ["fuel_pressure"],
             "oil_pressure_trend_single": ["oil_pressure"],
+            "map_trend": ["map"],
             "throttle_trend": ["tps", "aps"],
             "temp_trend": ["oil_temp", "ect"],
-            "pressure_trend": ["oil_pressure", "fuel_pressure"],
+            "pressure_trend": ["oil_pressure", "fuel_pressure", "map"],
         }
         if panel_name in CUSTOM_GRAPH_PANEL_NAMES:
             return [entry.get("key") for entry in self._current_custom_graphs().get(panel_name, []) if entry.get("key") in GRAPH_METRIC_OPTIONS]
@@ -4417,13 +4717,15 @@ class DashboardApp:
         if panel_name == "coolant_trend":
             return [{"label": "coolant", "color": ACCENT_2, "points": self._history_points("ect", window_s)}]
         if panel_name == "throughput_trend":
-            return [{"label": "throughput", "color": ACCENT, "points": self._history_points("throughput", window_s)}]
+            return [{"label": "payload", "color": ACCENT, "points": self._history_points("throughput", window_s)}]
         if panel_name == "lambda_trend":
             return [{"label": "lambda", "color": ACCENT, "points": self._history_points("lambda1", window_s)}]
         if panel_name == "fuel_pressure_trend_single":
             return [{"label": "fuel press", "color": ACCENT_2, "points": self._history_points("fuel_pressure", window_s)}]
         if panel_name == "oil_pressure_trend_single":
             return [{"label": "oil press", "color": ACCENT, "points": self._history_points("oil_pressure", window_s)}]
+        if panel_name == "map_trend":
+            return [{"label": "map", "color": "#A3E635", "points": self._history_points("map", window_s)}]
         if panel_name == "throttle_trend":
             return [
                 {"label": "tps", "color": ACCENT, "points": self._history_points("tps", window_s)},
@@ -4438,6 +4740,7 @@ class DashboardApp:
             return [
                 {"label": "oil press", "color": ACCENT, "points": self._history_points("oil_pressure", window_s)},
                 {"label": "fuel press", "color": ACCENT_2, "points": self._history_points("fuel_pressure", window_s)},
+                {"label": "map", "color": "#A3E635", "points": self._history_points("map", window_s)},
             ]
         if panel_name in CUSTOM_GRAPH_PANEL_NAMES:
             return self._custom_graph_series(panel_name)
@@ -4465,6 +4768,8 @@ class DashboardApp:
             self.rpm_tach.set_value(self.state.rpm)
         if self._panel_visible("lambda_gauge"):
             self.lambda_gauge.set_value(self.state.lambda1)
+        if self._panel_visible("map_gauge"):
+            self.map_gauge.set_value(self.state.map)
         if self._panel_visible("fuel_pressure_gauge"):
             self.fuel_pressure_gauge.set_value(self.state.fuel_pressure)
         if self._panel_visible("oil_pressure_gauge"):
@@ -4480,15 +4785,13 @@ class DashboardApp:
         elif self.connection_state == "connecting":
             link_state = "Connecting"
             pill_bg = WARNING
-        elif age < 1.0:
-            link_state = "Connected"
-            pill_bg = "#2E7D32"
-        elif age < 3.0:
-            link_state = "No Data"
-            pill_bg = WARNING
         else:
-            link_state = "Disconnected"
-            pill_bg = ACCENT_2
+            if age < 1.0:
+                link_state = "Connected"
+                pill_bg = "#2E7D32"
+            else:
+                link_state = "No Data"
+                pill_bg = WARNING
         self.status_pill.config(text=link_state.upper(), bg=pill_bg)
         self.last_alert_pill.config(text=f"ALERT: {self.last_alert_text}", fg=MUTED if self.last_alert_text == "NONE" else TEXT)
         if active_alerts:
@@ -4511,8 +4814,18 @@ class DashboardApp:
         if self._panel_visible("gear_stat"):
             self.gear_stat.set_text(gear_text)
         throughput_value = self.state.throughput.rendered_value
-        throughput_text = "--" if throughput_value is None else f"{throughput_value:.1f} kbps"
+        throughput_text = "PAYLOAD -- kbps" if throughput_value is None else f"PAYLOAD {throughput_value:.1f} kbps"
         self.throughput_pill.config(text=throughput_text)
+        halow_value = self.state.halow_link_mbps.rendered_value
+        if halow_value is None:
+            halow_text = "HALOW -- Mbps"
+            halow_fg = MUTED
+        else:
+            halow_text = f"HALOW {halow_value:.1f} Mbps"
+            if self.state.halow_bw_mhz is not None:
+                halow_text += f" | {self.state.halow_bw_mhz:g} MHz"
+            halow_fg = HALOW_ACCENT
+        self.halow_pill.config(text=halow_text, fg=halow_fg)
         self._handle_logging()
         now = time.monotonic()
         if now - self._last_graph_refresh_monotonic >= (self.GRAPH_REFRESH_MS / 1000.0):
@@ -4528,6 +4841,7 @@ class DashboardApp:
                 ("lambda_trend", self.lambda_trend),
                 ("fuel_pressure_trend_single", self.fuel_pressure_trend_single),
                 ("oil_pressure_trend_single", self.oil_pressure_trend_single),
+                ("map_trend", self.map_trend),
                 ("throttle_trend", self.throttle_trend),
                 ("temp_trend", self.temp_trend),
                 ("pressure_trend", self.pressure_trend),

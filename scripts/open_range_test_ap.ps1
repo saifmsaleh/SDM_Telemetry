@@ -17,7 +17,7 @@ function Start-RawSerialMonitor {
 
     try {
         $serial.Open()
-        Write-Host "AP raw serial monitor on $TargetPort @ $TargetBaud. Press Ctrl+C to stop." -ForegroundColor Yellow
+        Write-Host "Range-test AP raw serial monitor on $TargetPort @ $TargetBaud. Press Ctrl+C to stop." -ForegroundColor Yellow
         while ($true) {
             try {
                 $line = $serial.ReadLine()
@@ -103,7 +103,7 @@ function Resolve-IdfMonitorPath {
 
 $telemetryRoot = Split-Path $PSScriptRoot -Parent
 $repoRoot = Split-Path $telemetryRoot -Parent
-$elfPath = Join-Path $repoRoot "examples\chat_ap\build\chat_ap.elf"
+$elfPath = Join-Path $repoRoot "examples\range_test_ap\build\range_test_ap.elf"
 
 try {
     $pythonCmd = @(Resolve-PythonCommand -PreferredPython $Python)
@@ -116,7 +116,7 @@ catch {
 }
 
 if (-not (Test-Path -LiteralPath $elfPath)) {
-    Write-Warning "AP ELF not found, falling back to raw serial monitor: $elfPath"
+    Write-Warning "Range-test AP ELF not found, falling back to raw serial monitor: $elfPath"
     Start-RawSerialMonitor -TargetPort $Port -TargetBaud $Baud
     exit 0
 }

@@ -12,6 +12,10 @@ These PowerShell scripts are provided so the telemetry folder is usable without 
   - Opens the ESP-IDF monitor for the AP board when available, otherwise falls back to raw serial
 - `scripts/open_rp2350_monitor.ps1`
   - Opens a simple serial line monitor for the RP2350 bridge
+- `scripts/open_range_test_ap.ps1`
+  - Opens the AP board monitor for the dedicated HaLow range test
+- `scripts/open_range_test_sta.ps1`
+  - Opens the STA board monitor for the dedicated HaLow range test
 
 ## Default Ports
 
@@ -53,6 +57,18 @@ RP2350 monitor:
 powershell -ExecutionPolicy Bypass -File .\scripts\open_rp2350_monitor.ps1 -Port COM15
 ```
 
+Range-test AP monitor:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\open_range_test_ap.ps1 -Port COM13
+```
+
+Range-test STA monitor:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\open_range_test_sta.ps1 -Port COM12
+```
+
 ## Typical Workflow
 
 1. Open the STA monitor.
@@ -67,6 +83,7 @@ powershell -ExecutionPolicy Bypass -File .\scripts\open_rp2350_monitor.ps1 -Port
   - `IDF_PATH`
   - or a script argument like `-IdfPath C:\path\to\esp-idf`
 - If `idf_monitor.py` or the firmware ELF is not available, the AP/STA scripts automatically fall back to a plain serial monitor.
+- The range-test AP/STA scripts behave the same way, but point at `range_test_ap` and `range_test_sta` instead of the telemetry chat firmware.
 - `idf_monitor.py` is used directly because it is more reliable for this setup than `idf.py monitor`.
 - Exit the ESP-IDF monitor with `Ctrl+]`.
 - Stop the raw serial monitors with `Ctrl+C`.
