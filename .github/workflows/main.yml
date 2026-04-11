@@ -33,11 +33,11 @@ jobs:
       - name: Rename executable
         run: |
           if [[ "$RUNNER_OS" == "Windows" ]]; then
-            mv dist/SDM_Telemetry.exe dist/SDM_Telemetry-windows.exe
+            mv dist/can_dashboard_gui.exe dist/SDM_Telemetry-windows.exe
           elif [[ "$RUNNER_OS" == "Linux" ]]; then
-            mv dist/SDM_Telemetry dist/SDM_Telemetry-linux
+            mv dist/can_dashboard_gui dist/SDM_Telemetry-linux
           elif [[ "$RUNNER_OS" == "macOS" ]]; then
-            mv dist/SDM_Telemetry dist/SDM_Telemetry-macos
+            mv dist/can_dashboard_gui dist/SDM_Telemetry-macos
           fi
         shell: bash
 
