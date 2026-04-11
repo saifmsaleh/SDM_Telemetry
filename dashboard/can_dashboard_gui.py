@@ -1657,7 +1657,7 @@ class DashboardApp:
     def _register_panel(self, name: str, widget: tk.Widget):
         self.panel_widgets[name] = widget
         self._bind_panel_drag(widget, name)
-        handle = tk.Frame(self.dashboard, bg=ACCENT, width=14, height=14, cursor="size_nw_se")
+        handle = tk.Frame(self.dashboard, bg=ACCENT, width=14, height=14, cursor="arrow") # cross platform cursor
         handle.bind("<ButtonPress-1>", lambda event, panel=name: self._start_resize(event, panel))
         handle.bind("<B1-Motion>", lambda event, panel=name: self._resize_panel(event, panel))
         handle.bind("<ButtonRelease-1>", self._end_drag)
